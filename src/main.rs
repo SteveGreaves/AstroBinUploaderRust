@@ -8,6 +8,7 @@
 //! loaded and exits rather than pretending otherwise.
 
 mod cli;
+mod numeric;
 mod config;
 mod table;
 
