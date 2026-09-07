@@ -4,6 +4,7 @@
 //! shared state object: the Python side threads a `SessionState` through
 //! `execute()` calls, but the only field steps 1–3 read or write is the frame.
 
+pub mod aggregate;
 pub mod calibration;
 pub mod deduplicate;
 pub mod geocode;

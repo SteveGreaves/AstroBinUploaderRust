@@ -497,8 +497,9 @@ enum Harden {
     /// `site`: `astype(str).replace('nan', default)`.
     Site,
     /// Present in the core list only so it is created when missing; an
-    /// existing column is left exactly as found.
-    AsFound(Cell),
+    /// existing column is left exactly as found. The default it would be
+    /// created with is the entry's own second field.
+    AsFound,
 }
 
 /// Stage 7 — make sure the core columns exist and carry the expected type.
@@ -516,16 +517,16 @@ fn stage7_harden(df: &mut Table) {
         (col::SITE_LONG, Cell::Float(0.0), Float(0.0)),
         (col::BORTLE, Cell::Float(4.0), Float(4.0)),
         (col::MEAN_SQM, Cell::Float(21.0), Float(21.0)),
-        (col::TEMPERATURE, Cell::Float(20.0), AsFound(Cell::Float(20.0))),
+        (col::TEMPERATURE, Cell::Float(20.0), AsFound),
         (
             col::TARGET,
             Cell::Str("Unknown".into()),
-            AsFound(Cell::Str("Unknown".into())),
+            AsFound,
         ),
         (
             col::FILTER_NAME,
             Cell::Str("No Filter".into()),
-            AsFound(Cell::Str("No Filter".into())),
+            AsFound,
         ),
         (col::SITE_NAME, Cell::Str("Unknown Site".into()), Site),
         (col::BINNING, Cell::Int(1), Float(1.0)),
@@ -533,10 +534,10 @@ fn stage7_harden(df: &mut Table) {
         (col::MEAN_FWHM, Cell::Float(0.0), Float(0.0)),
         (col::IMSCALE, Cell::Float(1.0), Float(1.0)),
         (col::NUMBER, Cell::Int(1), Number),
-        ("darks", Cell::Int(0), AsFound(Cell::Int(0))),
-        ("flats", Cell::Int(0), AsFound(Cell::Int(0))),
-        ("flatDarks", Cell::Int(0), AsFound(Cell::Int(0))),
-        ("bias", Cell::Int(0), AsFound(Cell::Int(0))),
+        ("darks", Cell::Int(0), AsFound),
+        ("flats", Cell::Int(0), AsFound),
+        ("flatDarks", Cell::Int(0), AsFound),
+        ("bias", Cell::Int(0), AsFound),
     ];
 
     for (name, missing_default, how) in core {
@@ -546,7 +547,7 @@ fn stage7_harden(df: &mut Table) {
         };
 
         let hardened = match how {
-            AsFound(_) => continue,
+            AsFound => continue,
             Float(default) => Column {
                 name: name.to_string(),
                 dtype: DType::Float,

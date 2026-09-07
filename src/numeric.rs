@@ -46,16 +46,6 @@ pub fn numpy_round(x: f64, n: u32) -> f64 {
     scaled.round_ties_even() / f
 }
 
-/// `pd.to_numeric(errors='coerce')` for a single value: anything unparseable
-/// becomes null rather than raising.
-pub fn to_numeric(s: &str) -> Option<f64> {
-    let t = s.trim();
-    if t.is_empty() {
-        return None;
-    }
-    t.parse::<f64>().ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,13 +80,5 @@ mod tests {
         assert!(python_round(f64::NAN, 2).is_nan());
         assert!(numpy_round(f64::NAN, 2).is_nan());
         assert_eq!(python_round(f64::INFINITY, 2), f64::INFINITY);
-    }
-
-    #[test]
-    fn to_numeric_coerces_rather_than_failing() {
-        assert_eq!(to_numeric("100"), Some(100.0));
-        assert_eq!(to_numeric(" 1.5 "), Some(1.5));
-        assert_eq!(to_numeric("abc"), None);
-        assert_eq!(to_numeric(""), None);
     }
 }

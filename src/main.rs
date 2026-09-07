@@ -10,6 +10,7 @@
 mod appconfig;
 mod cli;
 mod config;
+mod datetime;
 mod constants;
 mod dump;
 mod numeric;
@@ -184,6 +185,11 @@ fn dump_steps(cfg: &ConfigFile, csv: &std::path::Path) -> Result<()> {
 
     let df = steps::geocode::execute(&df, &app)?;
     dump::dump_frame("05_GeocodeStep", &df, &mut out)?;
+
+    // The oracle switches frames for the last step: `AggregationStep` emits
+    // the aggregated frame, not the processed one it was built from.
+    let agg = steps::aggregate::execute(&df, &app)?;
+    dump::dump_frame("06_AggregationStep", &agg, &mut out)?;
 
     out.flush()?;
     Ok(())

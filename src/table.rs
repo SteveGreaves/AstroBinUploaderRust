@@ -54,6 +54,10 @@ pub enum DType {
     Float,
     Bool,
     Str,
+    /// Not produced by inference or by any step in the pipeline today; it
+    /// exists because `dump_steps.py` tags such a column `datetime64` and the
+    /// dump contract has to be able to say so.
+    #[allow(dead_code)]
     DateTime,
 }
 

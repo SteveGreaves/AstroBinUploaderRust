@@ -71,8 +71,10 @@ def main() -> int:
         # and not a set comparison.
         prefix = py_lines[: len(rs_lines)]
         steps = sorted({line.split("\t")[1] for line in rs_lines})
+        leftover = len(py_lines) - len(rs_lines)
+        tail = "" if leftover == 0 else f"; {leftover} line(s) still unported"
         if prefix == rs_lines:
-            print(f"[PASS] {name}: {len(rs_lines)} lines identical  ({', '.join(steps)})")
+            print(f"[PASS] {name}: {len(rs_lines)} lines identical{tail}  ({', '.join(steps)})")
         else:
             failures += 1
             print(f"[FAIL] {name}: {', '.join(steps)}")
@@ -82,9 +84,6 @@ def main() -> int:
                 check=False,
             )
 
-    remaining = len(py_lines) - len(rs_lines)
-    if remaining > 0:
-        print(f"\n{remaining} line(s) per fixture still unported (later steps).")
     if args.keep:
         print(f"dumps kept in {outdir}")
     print("\nall step parity checks passed." if not failures else f"\n{failures} fixture(s) differ.")

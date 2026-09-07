@@ -28,7 +28,7 @@ use crate::appconfig::AppConfig;
 use crate::constants as col;
 use crate::constants::image_type::LIGHT;
 use crate::numeric::{numpy_round, python_round};
-use crate::steps::{astype_str, kahan_mean, to_numeric};
+use crate::steps::{kahan_mean, to_numeric};
 use crate::table::{Cell, Column, DType, Table};
 
 /// Mean Earth radius in metres (IUGG).
@@ -365,13 +365,6 @@ fn default_float(cfg: &AppConfig, key: &str, fallback: f64) -> Result<f64> {
             .parse::<f64>()
             .map_err(|_| anyhow::anyhow!("[defaults] {key} = {:?} is not a number", v.as_str())),
     }
-}
-
-/// Unused today but kept beside its sibling: `astype_str` is how every other
-/// step reads a cell as text.
-#[allow(dead_code)]
-fn as_text(cell: &Cell) -> String {
-    astype_str(cell)
 }
 
 #[cfg(test)]

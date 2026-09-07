@@ -360,6 +360,24 @@ non-negative durations here the behaviours coincide, but pin it with tests.
 
 ### 4. Floating-point accumulation order
 
+**Settled in Phase 2, and it is not what a first guess would give.** Every
+`mean` in this pipeline goes through a `groupby`, and pandas' grouped mean is
+**Kahan-compensated** summation in row order — not the pairwise summation of
+`Series.mean()` / `np.mean()`, and not a naive running sum. Measured on pandas
+2.2.3 over `[1.0] + [1e-16] * 10`:
+
+| | value |
+|---|---|
+| `groupby(...).mean()` | `0.09090909090909101` |
+| `Series.mean()`, `np.mean()` | `0.09090909090909097` |
+| naive `sum / n` | `0.09090909090909091` |
+
+`steps::kahan_mean` implements the first. It is live, not theoretical: the
+`sadr` fixture's GPS cluster centroids average several drifting readings, and
+the aggregation step means nine columns. **If a bare `Series.mean()` ever
+appears in the Python, it needs a pairwise implementation instead** — the two
+are not interchangeable.
+
 pandas delegates `mean`/`sum` to numpy, which uses pairwise summation; a naive
 left fold in Rust can differ in the last ULP. After `{:.2}` this is invisible
 except when a value sits exactly on a `.005` boundary. Mitigate by summing in
@@ -380,6 +398,15 @@ Both appear in this codebase, sometimes within a few lines of each other
 functions. Port each faithfully to its own call site.
 
 ### 7. `pd.to_datetime(errors='coerce')`
+
+**Status (Phase 2): narrowly implemented, on purpose.** `src/datetime.rs`
+parses the ISO-8601 subset every `DATE-OBS` in this corpus uses — including
+the seven fractional digits in `sh2101_calib` — as nanoseconds since the
+epoch, and returns `NaT` for anything else. A trailing timezone is refused
+rather than dropped: pandas would return a tz-aware timestamp, and silently
+discarding the offset would move an observation into the wrong night. Widen it
+against a real dataset, never on speculation; a wrong parse is far worse than
+a NaT, which sorts to the end where it is visible.
 
 Accepts a very wide range of inputs. Pin the Rust parser to the formats actually
 present in FITS `DATE-OBS` — ISO 8601 with and without fractional seconds, `T`
@@ -577,7 +604,7 @@ covers.
 |---|---|---|
 | **0** | Freeze the contract — **done**: `v2.1.1` tagged and on `main`, goldens regenerated. | Nothing testable without it |
 | **1** | ~~Cargo scaffold, `clap` CLI, config parser, `--test` CSV ingest with pandas-equivalent dtype inference~~ — **done**, verified against configobj and pandas by `golden_tests/check_rust_parity.py` | Reaches end-to-end on committed fixtures without writing a single byte of FITS parsing |
-| **2** | The six pipeline steps as pure functions over `Table`, incl. `NormalizeHeadersStep` Stage 3b (equipment value overrides, v2.1.1). **Steps 1–3 done** (normalize, optical, deduplicate) — byte-identical to the Python oracle on both fixtures via `parity/check_steps.py`; steps 4–6 next | The bulk of the logic; fully exercised by Phase 1's CSV path |
+| **2** | ~~The six pipeline steps as pure functions over `Table`, incl. `NormalizeHeadersStep` Stage 3b (equipment value overrides, v2.1.1)~~ — **done**. All six are byte-identical to the Python oracle on both fixtures (`parity/check_steps.py`: 465 / 450 lines, every column, every cell, column *and* row order) | The bulk of the logic; fully exercised by Phase 1's CSV path |
 | **3** | Exporter + `reports.py` — the byte-parity grind | Hazard 1 lives here |
 | **4** | FITS and XISF readers | The only part the CSV fixtures cannot exercise. **Prerequisite:** `REMEDIATION_PLAN.md` P0 item 3 — hand-built FITS/XISF fixtures under `golden_tests/fixtures/binary/` — was never done and that directory does not exist. Build it as the first task of this phase, including a tile-compressed `.fits.fz` case. |
 | **5** | `rayon` parallelism; release matrix for Windows / Linux (`musl` static) / macOS, x86-64 and arm64 | Optimise only once correct |

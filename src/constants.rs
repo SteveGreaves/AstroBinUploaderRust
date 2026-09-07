@@ -32,6 +32,12 @@ pub const GAIN: &str = "gain";
 pub const EGAIN: &str = "egain";
 /// Hybrid EGAIN/GAIN handshake key, built by `CalibrationMatcherStep`.
 pub const GAIN_MATCH: &str = "gain_match";
+pub const CAMERA: &str = "instrume";
+pub const TELESCOPE: &str = "telescop";
+pub const FOCUSER: &str = "focname";
+pub const FILTER_WHEEL: &str = "fwheel";
+pub const ROTATOR_NAME: &str = "rotname";
+pub const SWCREATE: &str = "swcreate";
 
 /// Normalised `IMAGETYP` values (`constants.py::ImageType`).
 pub mod image_type {
