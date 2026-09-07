@@ -8,6 +8,7 @@
 //! loaded and exits rather than pretending otherwise.
 
 mod cli;
+mod dump;
 mod numeric;
 mod config;
 mod table;
@@ -49,6 +50,14 @@ fn main() -> Result<()> {
 
     if args.dump_parity {
         dump_parity(&cfg, args.test.as_deref())?;
+        return Ok(());
+    }
+
+    if args.dump_steps {
+        let Some(csv) = args.test.as_deref() else {
+            bail!("--dump-steps needs --test <csv>: disk scanning is Phase 4");
+        };
+        dump_steps(&cfg, csv)?;
         return Ok(());
     }
 
@@ -129,12 +138,7 @@ fn dump_parity(cfg: &ConfigFile, test_csv: Option<&std::path::Path>) -> Result<(
             .columns
             .iter()
             .map(|c| {
-                let d = match c.dtype {
-                    crate::table::DType::Int => "int64",
-                    crate::table::DType::Float => "float64",
-                    crate::table::DType::Bool => "bool",
-                    crate::table::DType::Str => "object",
-                };
+                let d = crate::dump::dtype_tag(c.dtype);
                 let nulls = c.cells.iter().filter(|x| x.is_null()).count();
                 format!("CSV\tcol\t{}\t{d}\t{nulls}", c.name)
             })
@@ -144,5 +148,25 @@ fn dump_parity(cfg: &ConfigFile, test_csv: Option<&std::path::Path>) -> Result<(
             println!("{c}");
         }
     }
+    Ok(())
+}
+
+/// Per-step dump, diffed line-for-line against `parity/dump_steps.py`.
+///
+/// Emits `00_raw` first, then one block per implemented step, so a mismatch
+/// localises to the first step that diverges. Steps not yet ported simply do
+/// not appear -- the diff is taken over the prefix both sides emit.
+fn dump_steps(cfg: &ConfigFile, csv: &std::path::Path) -> Result<()> {
+    use std::io::Write;
+
+    let raw = Table::read_csv_upper(csv)
+        .with_context(|| format!("ingesting {}", csv.display()))?;
+
+    let stdout = std::io::stdout();
+    let mut out = std::io::BufWriter::new(stdout.lock());
+    dump::dump_frame("00_raw", &raw, &mut out)?;
+
+    let _ = cfg; // steps land here as they are ported
+    out.flush()?;
     Ok(())
 }

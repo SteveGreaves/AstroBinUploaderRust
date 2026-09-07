@@ -42,12 +42,19 @@ fn is_na(s: &str) -> bool {
 }
 
 /// A column's inferred type, mirroring the pandas dtype it would carry.
+///
+/// `DateTime` is never produced by inference — `read_csv` leaves a date column
+/// as `object`, exactly as pandas does without `parse_dates`. It exists because
+/// later pipeline steps build real `datetime64` columns, and those must render
+/// with their own dtype tag. Its cells are `Cell::Str`, holding the same text
+/// `str(Timestamp)` produces on the Python side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DType {
     Int,
     Float,
     Bool,
     Str,
+    DateTime,
 }
 
 /// One cell. `Null` is pandas' NaN / NA.
@@ -181,7 +188,7 @@ fn coerce(value: &str, dtype: DType) -> Cell {
         DType::Int => parse_int(value).map(Cell::Int).unwrap_or(Cell::Null),
         DType::Float => parse_float(value).map(Cell::Float).unwrap_or(Cell::Null),
         DType::Bool => parse_bool(value).map(Cell::Bool).unwrap_or(Cell::Null),
-        DType::Str => Cell::Str(value.to_string()),
+        DType::Str | DType::DateTime => Cell::Str(value.to_string()),
     }
 }
 
@@ -208,15 +215,162 @@ fn parse_int(s: &str) -> Option<i64> {
     t.parse::<i64>().ok()
 }
 
+/// Float parse with pandas' semantics, which are **not** Rust's.
+///
+/// `read_csv`'s default `float_precision=None` selects `precise_xstrtod` in
+/// `pandas/_libs/src/parser/tokenizer.c`, and that converter is not correctly
+/// rounded: it accumulates at most 17 significant digits into a double, then
+/// applies a single multiply or divide by a tabulated power of ten. Rust's
+/// `str::parse::<f64>` *is* correctly rounded, so the two disagree by an ULP
+/// on values whose text carries a full 17-digit repr — which is exactly what
+/// the extractor writes into the fixtures. Measured on pandas 2.2.3:
+///
+/// ```text
+/// "2.4559285999999996"  default/high/legacy -> 2.4559286           (107dd2e4bda50340)
+///                       round_trip, strtod  -> 2.4559285999999996  (0f7dd2e4bda50340)
+/// ```
+///
+/// 62 of the 221 `FWHM` values in `sadr_raw.csv` differ on this, so the
+/// tokenizer's arithmetic has to be reproduced rather than improved on.
 fn parse_float(s: &str) -> Option<f64> {
     let t = s.trim();
     if t.is_empty() {
         return None;
     }
-    // Rust accepts "inf"/"NaN" spellings that pandas treats differently; the
-    // NA sentinels are already filtered out before this is reached, and a
-    // bare "inf" does parse as a float in pandas too.
-    t.parse::<f64>().ok()
+    precise_xstrtod(t).or_else(|| {
+        // `precise_xstrtod` only accepts digit-shaped text. pandas recognises
+        // the infinity spellings separately, in `_try_double_nogil`, before
+        // giving up on a column; Rust's parser covers the same spellings and
+        // no NA sentinel reaches here.
+        match t {
+            "inf" | "+inf" | "Inf" | "+Inf" | "Infinity" | "+Infinity" | "INF" => {
+                Some(f64::INFINITY)
+            }
+            "-inf" | "-Inf" | "-Infinity" | "-INF" => Some(f64::NEG_INFINITY),
+            _ => None,
+        }
+    })
+}
+
+/// pandas' `precise_xstrtod`, transcribed.
+///
+/// Consumes the whole field (leading and trailing ASCII whitespace aside) or
+/// returns `None`; a partial parse is not a float to the tokenizer either.
+fn precise_xstrtod(s: &str) -> Option<f64> {
+    /// The converter stops accumulating after this many significant digits and
+    /// tracks the rest in the exponent. This truncation is the source of the
+    /// ULP difference above.
+    const MAX_DIGITS: usize = 17;
+
+    let b = s.as_bytes();
+    let mut i = 0usize;
+    while i < b.len() && b[i].is_ascii_whitespace() {
+        i += 1;
+    }
+
+    let mut negative = false;
+    if i < b.len() && (b[i] == b'-' || b[i] == b'+') {
+        negative = b[i] == b'-';
+        i += 1;
+    }
+
+    let mut number = 0f64;
+    let mut exponent: i32 = 0;
+    let mut num_digits = 0usize;
+    let mut num_decimals = 0usize;
+
+    while i < b.len() && b[i].is_ascii_digit() {
+        if num_digits < MAX_DIGITS {
+            number = number * 10.0 + f64::from(b[i] - b'0');
+            num_digits += 1;
+        } else {
+            // Past the cap the digit only shifts the decimal point.
+            exponent += 1;
+        }
+        i += 1;
+    }
+
+    if i < b.len() && b[i] == b'.' {
+        i += 1;
+        while num_digits < MAX_DIGITS && i < b.len() && b[i].is_ascii_digit() {
+            number = number * 10.0 + f64::from(b[i] - b'0');
+            i += 1;
+            num_digits += 1;
+            num_decimals += 1;
+        }
+        if num_digits >= MAX_DIGITS {
+            while i < b.len() && b[i].is_ascii_digit() {
+                i += 1;
+            }
+        }
+        exponent -= num_decimals as i32;
+    }
+
+    if num_digits == 0 {
+        return None;
+    }
+    if negative {
+        number = -number;
+    }
+
+    if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
+        i += 1;
+        let mut exp_negative = false;
+        if i < b.len() && (b[i] == b'-' || b[i] == b'+') {
+            exp_negative = b[i] == b'-';
+            i += 1;
+        }
+        let mut n: i32 = 0;
+        let mut exp_digits = 0usize;
+        while exp_digits < MAX_DIGITS && i < b.len() && b[i].is_ascii_digit() {
+            n = n.saturating_mul(10).saturating_add(i32::from(b[i] - b'0'));
+            exp_digits += 1;
+            i += 1;
+        }
+        if exp_digits == 0 {
+            return None; // ERROR_EXPONENT_EMPTY
+        }
+        if exp_negative {
+            exponent -= n;
+        } else {
+            exponent += n;
+        }
+    }
+
+    while i < b.len() && b[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i != b.len() {
+        return None;
+    }
+
+    // One scaling operation, from the tabulated powers of ten.
+    Some(if exponent > 308 {
+        f64::INFINITY // ERANGE; pandas returns HUGE_VAL
+    } else if exponent > 0 {
+        number * pow10(exponent as usize)
+    } else if exponent < -308 {
+        if exponent < -616 {
+            0.0
+        } else {
+            number / pow10((-308 - exponent) as usize) / pow10(308)
+        }
+    } else {
+        number / pow10((-exponent) as usize)
+    })
+}
+
+/// `10^n` as the C compiler would materialise the literal `1eN`: the correctly
+/// rounded double for that decimal value, which is what tokenizer.c's static
+/// table holds. `powi` is not a substitute — it is exact only up to 1e22.
+fn pow10(n: usize) -> f64 {
+    static TABLE: std::sync::OnceLock<Vec<f64>> = std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| {
+        (0..=308)
+            .map(|i| format!("1e{i}").parse::<f64>().expect("power of ten"))
+            .collect()
+    });
+    table.get(n).copied().unwrap_or(f64::INFINITY)
 }
 
 fn parse_bool(s: &str) -> Option<bool> {
@@ -320,6 +474,56 @@ mod tests {
         assert_eq!(t.column("g").unwrap().cells[0], Cell::Int(7));
         // Beyond i64, pandas keeps the column as object.
         assert_eq!(dtype_of("g,h\n99999999999999999999,1\n2,2\n"), DType::Str);
+    }
+
+    /// The pandas tokenizer's float conversion is not correctly rounded, and
+    /// the fixtures contain values that expose it. Bit patterns taken from
+    /// `struct.pack("<d", pd.read_csv(...)[col][row]).hex()` on pandas 2.2.3.
+    #[test]
+    fn floats_match_pandas_precise_xstrtod_not_correctly_rounded_strtod() {
+        let cases = [
+            ("2.4559285999999996", 0x107dd2e4bda50340u64),
+            ("2.4702907555555553", 0x27c7b5cc27c30340),
+            ("2.3123070444444442", 0x2d98f1d59a7f0240),
+            ("2.3984799777777774", 0xb454454516300340),
+        ];
+        for (text, want_le_bits) in cases {
+            let got = parse_float(text).unwrap();
+            let got_hex: String = got
+                .to_bits()
+                .to_le_bytes()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            let want_hex: String = want_le_bits
+                .to_be_bytes()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            assert_eq!(got_hex, want_hex, "{text}");
+            // And it is genuinely different from a correctly rounded parse.
+            assert_ne!(got.to_bits(), text.parse::<f64>().unwrap().to_bits(), "{text}");
+        }
+    }
+
+    #[test]
+    fn short_decimals_agree_with_the_correctly_rounded_parse() {
+        for text in ["600.0", "1.5", "0.0", "-3.25", "1e3", "2.5E-4", "  7.5  "] {
+            assert_eq!(
+                parse_float(text).unwrap().to_bits(),
+                text.trim().parse::<f64>().unwrap().to_bits(),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_numeric_text_is_not_a_float() {
+        assert_eq!(parse_float("abc"), None);
+        assert_eq!(parse_float("1.2.3"), None);
+        assert_eq!(parse_float("1e"), None);
+        assert_eq!(parse_float("--1"), None);
+        assert!(parse_float("inf").unwrap().is_infinite());
     }
 
     #[test]

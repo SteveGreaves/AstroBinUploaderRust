@@ -47,6 +47,12 @@ pub struct Cli {
     /// part of the Python CLI surface.
     #[arg(long, hide = true)]
     pub dump_parity: bool,
+
+    /// Print the per-step canonical dump that `parity/dump_steps.py` produces
+    /// on the Python side, and exit. Requires `--test`. Hidden: a verification
+    /// aid, not part of the Python CLI surface.
+    #[arg(long, hide = true)]
+    pub dump_steps: bool,
 }
 
 #[cfg(test)]
