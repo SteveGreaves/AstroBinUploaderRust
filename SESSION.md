@@ -64,7 +64,7 @@ reordering — reduces to `Table::take_rows(&[usize])`, which keeps row order ex
 ## 🚧 Current Blockers & Technical Debt
 
 - **Nothing blocking.** Builds clean with no warnings, 83 tests pass, both parity harnesses
-  green. **Nothing is pushed** — six commits sit on local `main` ahead of `origin`.
+  green. Phase 2 is pushed; local `main` and `origin/main` are in sync at `514edfd`.
 - `check_steps.py` verifies its own oracle before running: the sibling Python checkout must
   be at the parity target (v2.1.1 per `_version.py`) and the committed corpus copies must
   still match that checkout's `golden_tests/`. `ASTROBIN_PY_REPO` and `ASTROBIN_PYTHON`
