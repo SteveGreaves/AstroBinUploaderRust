@@ -169,6 +169,25 @@ Recommend `Vec<Frame>` with explicit `BTreeMap` grouping over pulling in polars.
 Model missing values as `Option<T>` and be deliberate at every call site about
 whether pandas would have skipped or propagated.
 
+**Deviation, decided in Phase 1 and confirmed by Phase 2 (`src/table.rs`):
+a dynamic, column-oriented `Table`, not `Vec<Frame>`.**
+
+The reason is not performance and not the column count — it is that the frame's
+shape is *user-defined*. `[defaults]`, `[override]` and `[equipmentoverrides]`
+each create columns named by whatever the user wrote in their INI, so a fixed
+struct cannot carry the frame: a `[defaults] ROTATANG = 0` entry that matches no
+FITS keyword still becomes a real column that survives to the end of
+normalisation. A `Table` of `Column { name, dtype, cells }` tolerates that, and
+carrying an explicit per-column `DType` is what makes int-vs-float visible in
+the output reproducible at all (hazard 14).
+
+Everything else in this section stands: no polars, explicit pandas semantics,
+nulls modelled as a `Cell::Null` variant rather than implied by a sentinel
+value. Typed accessors go on top of `Table` so step logic is not
+stringly-typed, and every row operation that pandas expresses as a filter, a
+`concat` or a `groupby` reduces to one primitive — `take_rows(&[usize])` — so
+row order stays explicit and auditable rather than emerging from a merge.
+
 ### Pipeline order — pin it
 
 `AstroBinUpload.py:202–207`. The order is load-bearing and not the one you'd
@@ -515,10 +534,37 @@ run these rules per column up front and carry the decision as the column's type
 for the rest of the run. Float formatting must round-trip (`repr`-shortest),
 not fixed precision.
 
-**Status: implemented and verified.** `rust/src/table.rs` reproduces every row
-above; `golden_tests/check_rust_parity.py` diffs the Rust dtype inference
-against live pandas over both fixtures and currently passes on all 64/63
-columns.
+**Status: implemented and verified.** `src/table.rs` reproduces every row
+above; `parity/check_parity.py` diffs the Rust dtype inference against live
+pandas over both fixtures and currently passes on all 64/63 columns.
+
+#### 14b. …and the float *values* are not correctly rounded
+
+Found in Phase 2, on the first per-step diff, and not anticipated anywhere
+above: getting the dtype right is not enough, because **pandas' CSV float
+converter is not correctly rounded and Rust's is**.
+
+`read_csv`'s default `float_precision=None` selects `precise_xstrtod`
+(`pandas/_libs/src/parser/tokenizer.c`), which accumulates at most 17
+significant digits into a double and then applies a single multiply or divide
+by a tabulated power of ten. Rust's `str::parse::<f64>` is correctly rounded.
+They differ by one ULP on any value whose text carries a full 17-digit repr —
+which is exactly what the extractor writes. Measured on pandas 2.2.3:
+
+| `"2.4559285999999996"` | value | bits (LE) |
+|---|---|---|
+| `float_precision` default / `high` / `legacy` | `2.4559286` | `107dd2e4bda50340` |
+| `float_precision='round_trip'`, `float()`, Rust `parse` | `2.4559285999999996` | `0f7dd2e4bda50340` |
+
+62 of the 221 `FWHM` values in `sadr_raw.csv` differ on this. `precise_xstrtod`
+is transcribed in `table.rs::precise_xstrtod`, with the powers of ten tabulated
+as the C literal `1eN` materialises them (`powi` is exact only to `1e22`).
+
+`pd.to_numeric` uses the same converter, so Stage 7's hardening shares it. The
+one place that does **not** is a direct `float(x)` call in Python source — the
+master-preference group key — which is the correctly rounded builtin. Both are
+available as `steps::to_numeric` and `steps::python_float`; the distinction is
+per call site, not per type.
 
 ---
 
@@ -531,7 +577,7 @@ covers.
 |---|---|---|
 | **0** | Freeze the contract — **done**: `v2.1.1` tagged and on `main`, goldens regenerated. | Nothing testable without it |
 | **1** | ~~Cargo scaffold, `clap` CLI, config parser, `--test` CSV ingest with pandas-equivalent dtype inference~~ — **done**, verified against configobj and pandas by `golden_tests/check_rust_parity.py` | Reaches end-to-end on committed fixtures without writing a single byte of FITS parsing |
-| **2** | The six pipeline steps as pure functions over `Vec<Frame>`, incl. `NormalizeHeadersStep` Stage 3b (equipment value overrides, v2.1.1) | The bulk of the logic; fully exercised by Phase 1's CSV path |
+| **2** | The six pipeline steps as pure functions over `Table`, incl. `NormalizeHeadersStep` Stage 3b (equipment value overrides, v2.1.1). **Steps 1–3 done** (normalize, optical, deduplicate) — byte-identical to the Python oracle on both fixtures via `parity/check_steps.py`; steps 4–6 next | The bulk of the logic; fully exercised by Phase 1's CSV path |
 | **3** | Exporter + `reports.py` — the byte-parity grind | Hazard 1 lives here |
 | **4** | FITS and XISF readers | The only part the CSV fixtures cannot exercise. **Prerequisite:** `REMEDIATION_PLAN.md` P0 item 3 — hand-built FITS/XISF fixtures under `golden_tests/fixtures/binary/` — was never done and that directory does not exist. Build it as the first task of this phase, including a tile-compressed `.fits.fz` case. |
 | **5** | `rayon` parallelism; release matrix for Windows / Linux (`musl` static) / macOS, x86-64 and arm64 | Optimise only once correct |

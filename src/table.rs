@@ -87,9 +87,89 @@ pub struct Table {
     pub n_rows: usize,
 }
 
+impl Column {
+    /// A column of one repeated value, the way `df[name] = scalar` broadcasts.
+    pub fn broadcast(name: &str, value: Cell, n_rows: usize) -> Self {
+        let dtype = match value {
+            Cell::Int(_) => DType::Int,
+            Cell::Float(_) => DType::Float,
+            Cell::Bool(_) => DType::Bool,
+            // A broadcast NaN makes a float64 column, as in pandas.
+            Cell::Str(_) | Cell::Null => {
+                if matches!(value, Cell::Null) {
+                    DType::Float
+                } else {
+                    DType::Str
+                }
+            }
+        };
+        Column {
+            name: name.to_string(),
+            dtype,
+            cells: vec![value; n_rows],
+        }
+    }
+}
+
 impl Table {
     pub fn column(&self, name: &str) -> Option<&Column> {
         self.columns.iter().find(|c| c.name == name)
+    }
+
+    pub fn column_mut(&mut self, name: &str) -> Option<&mut Column> {
+        self.columns.iter_mut().find(|c| c.name == name)
+    }
+
+    pub fn has_column(&self, name: &str) -> bool {
+        self.columns.iter().any(|c| c.name == name)
+    }
+
+    /// The first column whose name matches case-insensitively, as Stage 1's
+    /// `[c for c in df.columns if c.upper() == hw_key.upper()][0]` picks it.
+    pub fn column_ignore_case(&self, name: &str) -> Option<&Column> {
+        self.columns
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
+    }
+
+    /// `df[name] = column`: replaces in place, keeping the column's position,
+    /// or appends at the end when the name is new. Position matters — the
+    /// per-step dump compares column order.
+    pub fn set_column(&mut self, name: &str, mut col: Column) {
+        col.name = name.to_string();
+        match self.columns.iter().position(|c| c.name == name) {
+            Some(i) => self.columns[i] = col,
+            None => self.columns.push(col),
+        }
+    }
+
+    /// `df[name] = scalar`.
+    pub fn set_scalar(&mut self, name: &str, value: Cell) {
+        let col = Column::broadcast(name, value, self.n_rows);
+        self.set_column(name, col);
+    }
+
+    pub fn drop_column(&mut self, name: &str) {
+        self.columns.retain(|c| c.name != name);
+    }
+
+    /// Row selection *and* reordering in one: the frame containing `idx`'s
+    /// rows, in `idx`'s order. Both `df[mask]` and the `pd.concat` in master
+    /// preference reduce to this, which keeps every row operation a
+    /// permutation of the same columns rather than a frame merge.
+    pub fn take_rows(&self, idx: &[usize]) -> Table {
+        Table {
+            columns: self
+                .columns
+                .iter()
+                .map(|c| Column {
+                    name: c.name.clone(),
+                    dtype: c.dtype,
+                    cells: idx.iter().map(|&i| c.cells[i].clone()).collect(),
+                })
+                .collect(),
+            n_rows: idx.len(),
+        }
     }
 
     /// Reads a CSV the way `extract_from_csv` does: infer dtypes, then
@@ -232,7 +312,7 @@ fn parse_int(s: &str) -> Option<i64> {
 ///
 /// 62 of the 221 `FWHM` values in `sadr_raw.csv` differ on this, so the
 /// tokenizer's arithmetic has to be reproduced rather than improved on.
-fn parse_float(s: &str) -> Option<f64> {
+pub fn parse_float(s: &str) -> Option<f64> {
     let t = s.trim();
     if t.is_empty() {
         return None;

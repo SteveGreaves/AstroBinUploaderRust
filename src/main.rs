@@ -7,10 +7,13 @@
 //! readers (Phase 4) are not implemented yet; the binary reports what it
 //! loaded and exits rather than pretending otherwise.
 
+mod appconfig;
 mod cli;
+mod config;
+mod constants;
 mod dump;
 mod numeric;
-mod config;
+mod steps;
 mod table;
 
 use anyhow::{bail, Context, Result};
@@ -161,12 +164,21 @@ fn dump_steps(cfg: &ConfigFile, csv: &std::path::Path) -> Result<()> {
 
     let raw = Table::read_csv_upper(csv)
         .with_context(|| format!("ingesting {}", csv.display()))?;
+    let app = crate::appconfig::AppConfig::from_config(cfg)?;
 
     let stdout = std::io::stdout();
     let mut out = std::io::BufWriter::new(stdout.lock());
     dump::dump_frame("00_raw", &raw, &mut out)?;
 
-    let _ = cfg; // steps land here as they are ported
+    let df = steps::normalize::execute(&raw, &app)?;
+    dump::dump_frame("01_NormalizeHeadersStep", &df, &mut out)?;
+
+    let df = steps::optical::execute(&df, &app)?;
+    dump::dump_frame("02_OpticalParameterStep", &df, &mut out)?;
+
+    let df = steps::deduplicate::execute(&df)?;
+    dump::dump_frame("03_DeduplicateStep", &df, &mut out)?;
+
     out.flush()?;
     Ok(())
 }
