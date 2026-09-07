@@ -315,6 +315,19 @@ route HFR / IMSCALE / MEAN_FWHM through it, then `{:.2}` on top. Rust's
 `{:.N}` formatter is itself half-to-even and matches the trailing format
 step. **Do not use `f64::round()` anywhere.**
 
+**Both algorithms are live — the port needs two helpers, not one.** A later
+read of `base.py` Stage 7 found the pandas path is used there:
+
+| Site | Call | Algorithm |
+|---|---|---|
+| `optical.py::_python_round` (HFR, IMSCALE, FWHM) | `series.apply(lambda x: round(x, 2))` | **builtin**, decimal half-to-even |
+| `base.py` Stage 7, `exposure` | `pd.to_numeric(...).fillna(0.0).round(2)` | **pandas/numpy**, multiply–rint–divide |
+| `base.py` Stage 7, `gain` | `pd.to_numeric(...).fillna(0).round()` | **pandas/numpy**, to 0 dp, then `astype(int)` |
+| `geocode.py::_find_site_in_db` | `db_lat.round(p)` vs `round(lat, p)` | **one of each**, on the two sides of one equality |
+
+So implement `python_round(x, n)` *and* `numpy_round(x, n)` and pick per call
+site from the table above. Using either one everywhere is wrong.
+
 One asymmetry to reproduce deliberately: `geocode.py::_find_site_in_db`
 compares `db_lat.round(precision)` (pandas/numpy rint) against
 `round(lat, precision)` (builtin) — the two sides of that equality use
