@@ -63,8 +63,12 @@ reordering — reduces to `Table::take_rows(&[usize])`, which keeps row order ex
 
 ## 🚧 Current Blockers & Technical Debt
 
-- **Nothing blocking.** Builds clean with no warnings, 82 tests pass, both parity harnesses
-  green. **Nothing is pushed** — four commits sit on local `main` ahead of `origin`.
+- **Nothing blocking.** Builds clean with no warnings, 83 tests pass, both parity harnesses
+  green. **Nothing is pushed** — six commits sit on local `main` ahead of `origin`.
+- `check_steps.py` verifies its own oracle before running: the sibling Python checkout must
+  be at the parity target (v2.1.1 per `_version.py`) and the committed corpus copies must
+  still match that checkout's `golden_tests/`. `ASTROBIN_PY_REPO` and `ASTROBIN_PYTHON`
+  override the paths.
 - Two paths are deliberately narrow because no fixture reaches them, and both say so in
   code rather than pretending otherwise:
   - `normalize.rs::parse_iso_datetime` / `datetime.rs::parse` handle ISO-8601 only. The

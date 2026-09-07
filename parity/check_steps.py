@@ -8,13 +8,21 @@ rather than failing.
 
     python3 parity/check_steps.py [--release] [--keep tmpdir]
 
+Environment: ASTROBIN_PY_REPO points at the Python checkout the oracle imports
+(default: the sibling AstroBinUploader), ASTROBIN_PYTHON at an interpreter with
+pandas and configobj installed. Both are verified before anything runs -- see
+check_oracle().
+
 Exit status is 0 when every fixture agrees. A mismatch prints the offending
 columns and rows via narrow.py rather than dumping the raw diff, because one
 column is a single line of up to 1693 values.
 """
 
 import argparse
+import filecmp
+import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -26,11 +34,57 @@ FIXTURES = [
     ("sh2101_calib", HERE / "fixtures" / "sh2101_calib_raw.csv"),
 ]
 CONFIG = HERE / "golden_config.ini"
-PYTHON = "/mnt/raid0/Code/venvs/.astrovenv/bin/python3"
+
+# The oracle runs the *live* Python pipeline, so the checkout it imports is as
+# much a part of the baseline as the fixtures are -- and unlike the fixtures,
+# nothing here is a committed copy. Both are verified below.
+PARITY_TARGET = "2.1.1"
+PYTHON = os.environ.get(
+    "ASTROBIN_PYTHON", "/mnt/raid0/Code/venvs/.astrovenv/bin/python3"
+)
+PY_REPO = pathlib.Path(
+    os.environ.get("ASTROBIN_PY_REPO", REPO.parent / "AstroBinUploader")
+)
 
 
 def run(cmd, **kw):
     return subprocess.run(cmd, check=True, text=True, capture_output=True, **kw)
+
+
+def check_oracle(repo: pathlib.Path) -> list:
+    """Fail loudly if the oracle is no longer the version we claim parity with.
+
+    Two ways this goes wrong silently, both of which have bitten this project
+    before: the sibling checkout drifts off the parity target (every run still
+    prints PASS, against a different baseline), or the committed corpus copies
+    go stale against the upstream `golden_tests/` they were taken from.
+    """
+    problems = []
+    version_py = repo / "_version.py"
+    if not version_py.exists():
+        return [f"no Python checkout at {repo} (set ASTROBIN_PY_REPO)"]
+
+    text = version_py.read_text(encoding="utf-8")
+    found = re.search(r"__version__\s*=\s*['\"]([^'\"]+)", text)
+    version = found.group(1) if found else "?"
+    if version != PARITY_TARGET:
+        problems.append(
+            f"{repo} is at v{version}, but the parity contract names "
+            f"v{PARITY_TARGET} (PORT_PLAN.md, parity/CORPUS.md)"
+        )
+
+    upstream = repo / "golden_tests"
+    pairs = [(CONFIG, upstream / "golden_config.ini")]
+    pairs += [(f, upstream / "fixtures" / f.name) for _, f in FIXTURES]
+    for ours, theirs in pairs:
+        if not theirs.exists():
+            problems.append(f"upstream copy missing: {theirs}")
+        elif not filecmp.cmp(ours, theirs, shallow=False):
+            problems.append(
+                f"{ours.name} differs from {theirs} -- the corpus copies are "
+                f"stale; re-copy and update parity/CORPUS.md"
+            )
+    return problems
 
 
 def main() -> int:
@@ -45,6 +99,16 @@ def main() -> int:
         print(f"binary not built: {exe} (cargo build{' --release' if args.release else ''})")
         return 2
 
+    problems = check_oracle(PY_REPO)
+    if problems:
+        for p in problems:
+            print(f"[STALE] {p}")
+        return 2
+    describe = run(
+        ["git", "-C", str(PY_REPO), "describe", "--tags", "--always"]
+    ).stdout.strip()
+    print(f"oracle: {PY_REPO} v{PARITY_TARGET} ({describe})\n")
+
     outdir = pathlib.Path(args.keep) if args.keep else pathlib.Path(tempfile.mkdtemp())
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -53,7 +117,8 @@ def main() -> int:
         py_path = outdir / f"py_{name}.txt"
         rs_path = outdir / f"rs_{name}.txt"
 
-        py = run([PYTHON, str(HERE / "dump_steps.py"), str(fixture), str(CONFIG)])
+        py = run([PYTHON, str(HERE / "dump_steps.py"), str(fixture), str(CONFIG),
+                  "--python-repo", str(PY_REPO)])
         py_path.write_text(py.stdout, encoding="utf-8")
 
         rs = run([str(exe), ".", "--test", str(fixture), "--config", str(CONFIG), "--dump-steps"])

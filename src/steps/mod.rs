@@ -126,22 +126,37 @@ pub fn cast(cell: &Cell, to: DType) -> Cell {
 /// only one needed — but if a bare `Series.mean()` ever appears, it needs a
 /// pairwise implementation, not this.
 pub fn kahan_mean(values: impl IntoIterator<Item = f64>) -> f64 {
+    let mut n = 0usize;
+    let sum = kahan_sum(values.into_iter().inspect(|_| n += 1));
+    sum / n as f64
+}
+
+/// `groupby(...).agg('sum')`, which is compensated the same way. Measured on
+/// the same input as above: pandas gives `1.000000000000001` where a naive
+/// left fold gives `1.0`.
+pub fn kahan_sum(values: impl IntoIterator<Item = f64>) -> f64 {
     let mut sum = 0.0f64;
     let mut compensation = 0.0f64;
-    let mut n = 0usize;
     for v in values {
         let y = v - compensation;
         let t = sum + y;
         compensation = (t - sum) - y;
         sum = t;
-        n += 1;
     }
-    sum / n as f64
+    sum
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kahan_sum_matches_pandas_groupby_sum() {
+        let mut v = vec![1.0f64];
+        v.extend(std::iter::repeat(1e-16).take(10));
+        assert_eq!(kahan_sum(v.iter().copied()), 1.000000000000001);
+        assert_eq!(v.iter().sum::<f64>(), 1.0); // the naive fold loses them
+    }
 
     #[test]
     fn kahan_mean_matches_pandas_groupby_not_numpy() {

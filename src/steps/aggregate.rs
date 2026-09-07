@@ -26,7 +26,7 @@ use crate::appconfig::AppConfig;
 use crate::constants as col;
 use crate::constants::image_type::LIGHT;
 use crate::datetime::{self, Timestamp};
-use crate::steps::{astype_str, kahan_mean, to_numeric};
+use crate::steps::{astype_str, kahan_mean, kahan_sum, to_numeric};
 use crate::table::{Cell, Column, DType, Table};
 
 /// How each aggregated column is reduced, and from which source column.
@@ -117,30 +117,26 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
     } else {
         // Cut into sessions across *all* frames, not just lights, then date
         // every row by its session's first timestamp.
-        let mut session_first: Vec<Option<Timestamp>> = Vec::with_capacity(df.n_rows);
-        let mut current: Option<Timestamp> = None;
         let mut ids: Vec<usize> = Vec::with_capacity(df.n_rows);
         let mut id = 0usize;
+        // `prev` holds the last non-null date, while pandas' `.diff()`
+        // compares against the immediately preceding row. The two agree only
+        // because the sort above puts every NaT at the end, so a real date
+        // never follows one; change that sort and this has to change with it.
         let mut prev: Option<Timestamp> = None;
         for d in &dates {
             if let (Some(p), Some(c)) = (prev, *d) {
                 if c - p > datetime::SESSION_GAP_NS {
                     id += 1;
-                    current = None;
                 }
             }
-            // `transform('first')` takes the first *non-null* in the group.
-            if current.is_none() {
-                current = *d;
-            }
             ids.push(id);
-            session_first.push(current);
             if d.is_some() {
                 prev = *d;
             }
         }
-        // A session's first non-null timestamp may appear after rows that
-        // preceded it, so make a second pass with the resolved value.
+        // `transform('first')` takes the first *non-null* value in each group,
+        // which need not be the group's first row.
         let mut firsts: Vec<Option<Timestamp>> = vec![None; id + 1];
         for (i, d) in dates.iter().enumerate() {
             if firsts[ids[i]].is_none() {
@@ -419,7 +415,11 @@ fn reduce(rule: &Rule, src: &Column, rows: &[usize]) -> Cell {
             let values: Vec<f64> = rows.iter().filter_map(|&i| to_numeric(&src.cells[i])).collect();
             match src.dtype {
                 DType::Int => Cell::Int(values.iter().map(|v| *v as i64).sum()),
-                _ => Cell::Float(values.iter().sum()),
+                // Unreachable today -- the only `Sum` rule sources `number`,
+                // which stage 7 hardens to int64 unconditionally -- but a
+                // naive fold here would be a silent parity bug the moment it
+                // stopped being unreachable.
+                _ => Cell::Float(kahan_sum(values.iter().copied())),
             }
         }
         Rule::Min | Rule::Max => {
