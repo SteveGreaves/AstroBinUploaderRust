@@ -30,6 +30,8 @@ pub const HFR: &str = "hfr";
 pub const IMSCALE: &str = "imscale";
 pub const GAIN: &str = "gain";
 pub const EGAIN: &str = "egain";
+/// Hybrid EGAIN/GAIN handshake key, built by `CalibrationMatcherStep`.
+pub const GAIN_MATCH: &str = "gain_match";
 
 /// Normalised `IMAGETYP` values (`constants.py::ImageType`).
 pub mod image_type {

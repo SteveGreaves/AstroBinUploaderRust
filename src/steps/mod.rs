@@ -4,7 +4,9 @@
 //! shared state object: the Python side threads a `SessionState` through
 //! `execute()` calls, but the only field steps 1–3 read or write is the frame.
 
+pub mod calibration;
 pub mod deduplicate;
+pub mod geocode;
 pub mod normalize;
 pub mod optical;
 
@@ -103,5 +105,50 @@ pub fn cast(cell: &Cell, to: DType) -> Cell {
     match (cell, to) {
         (Cell::Int(i), DType::Float) => Cell::Float(*i as f64),
         _ => cell.clone(),
+    }
+}
+
+/// The mean pandas' `groupby(...).agg('mean')` computes: a **Kahan
+/// compensated** running sum in row order, divided by the count.
+///
+/// This is not `Series.mean()` and not `np.mean()` — both of those use
+/// pairwise summation and give a different last bit. Measured on pandas
+/// 2.2.3 with `[1.0] + [1e-16] * 10`:
+///
+/// ```text
+/// groupby.mean  0.09090909090909101   (Kahan)
+/// Series.mean   0.09090909090909097   (pairwise)
+/// naive sum/n   0.09090909090909091
+/// ```
+///
+/// Every `'mean'` in this pipeline goes through a groupby, so this is the
+/// only one needed — but if a bare `Series.mean()` ever appears, it needs a
+/// pairwise implementation, not this.
+pub fn kahan_mean(values: impl IntoIterator<Item = f64>) -> f64 {
+    let mut sum = 0.0f64;
+    let mut compensation = 0.0f64;
+    let mut n = 0usize;
+    for v in values {
+        let y = v - compensation;
+        let t = sum + y;
+        compensation = (t - sum) - y;
+        sum = t;
+        n += 1;
+    }
+    sum / n as f64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kahan_mean_matches_pandas_groupby_not_numpy() {
+        let mut v = vec![1.0f64];
+        v.extend(std::iter::repeat(1e-16).take(10));
+        assert_eq!(kahan_mean(v.iter().copied()), 0.09090909090909101);
+        // The naive sum loses every small term.
+        let naive: f64 = v.iter().sum::<f64>() / v.len() as f64;
+        assert_ne!(naive, 0.09090909090909101);
     }
 }

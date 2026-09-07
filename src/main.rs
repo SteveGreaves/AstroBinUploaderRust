@@ -179,6 +179,12 @@ fn dump_steps(cfg: &ConfigFile, csv: &std::path::Path) -> Result<()> {
     let df = steps::deduplicate::execute(&df)?;
     dump::dump_frame("03_DeduplicateStep", &df, &mut out)?;
 
+    let df = steps::calibration::execute(&df)?;
+    dump::dump_frame("04_CalibrationMatcherStep", &df, &mut out)?;
+
+    let df = steps::geocode::execute(&df, &app)?;
+    dump::dump_frame("05_GeocodeStep", &df, &mut out)?;
+
     out.flush()?;
     Ok(())
 }

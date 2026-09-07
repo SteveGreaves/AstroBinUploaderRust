@@ -395,7 +395,7 @@ fn format_2f(x: f64) -> String {
 /// No fixture reaches this — it needs two masters in one hardware group — so
 /// it is deliberately narrow rather than a speculative reimplementation of
 /// pandas' parser. Widen it against a real dataset, not by guessing.
-fn parse_iso_datetime(s: &str) -> Option<(i32, u32, u32, u32, u32, u32, u32)> {
+pub fn parse_iso_datetime(s: &str) -> Option<(i32, u32, u32, u32, u32, u32, u32)> {
     let s = s.trim();
     let (date, time) = match s.split_once(['T', ' ']) {
         Some((d, t)) => (d, t),
