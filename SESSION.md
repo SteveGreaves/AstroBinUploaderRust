@@ -79,12 +79,9 @@ columns so step logic isn't stringly-typed. **This deviation is not yet written 
   to validate FITS/XISF readers against synthetic binary fixtures from the upstream P0 plan;
   those were never built. Phase 4 must build them first, including a tile-compressed
   `.fits.fz` case.
-- **Upstream PR #13 is still open and unmerged** (a one-line `SESSION.md` doc change on the
-  Python repo). `gh pr merge` and `gh issue close` were denied by this session's auto-mode
-  classifier all session. Adding `"Bash(gh:*)"` to `autoMode.allow` in
-  `~/.claude/settings.json` fixes it; the user has not done so. Several upstream issues are
-  fixed in code but still show open for the same reason — see the reconciliation table at
-  the end of the upstream `REMEDIATION_PLAN.md`.
+- **Upstream tracker is clear** (done 2026-09-07): issues #3/#4/#5/#6/#11 and PRs #8/#13
+  closed. Only #9 and #10 remain open, pending a re-test against the reporter's data.
+  `"Bash(gh:*)"` is now in `autoMode.allow`, so `gh` writes work.
 - The user is **content** that their home address appears in the public upstream repo's
   golden references (it is the reverse-geocoded FITS GPS). Do not raise it again.
 
