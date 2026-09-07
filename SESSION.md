@@ -12,121 +12,107 @@ and fourteen ranked parity hazards. Read it before writing code.
 
 - This repo: `/mnt/raid0/Agent_Code/Astronomy/AstroBinUploaderRust` → github.com/SteveGreaves/AstroBinUploaderRust (**private**)
 - Python upstream: `/mnt/raid0/Agent_Code/Astronomy/AstroBinUploader` → github.com/SteveGreaves/AstroBinUploader (public)
-- Toolchain: cargo/rustc 1.98.1, installed this session at `~/.cargo/bin` (`. "$HOME/.cargo/env"`)
+- Toolchain: cargo/rustc 1.98.1 at `~/.cargo/bin` (`. "$HOME/.cargo/env"`)
 - Python venv for the parity scripts: `/mnt/raid0/Code/venvs/.astrovenv/bin/python3`
 
 ## ✅ Completed Work
 
-**Phase 1 — complete and verified** (commit `77c2eb9`)
+**Phase 1 — complete** (`77c2eb9`): `src/cli.rs` (clap mirror of argparse), `src/config.rs`
+(configobj-compatible parser: bracket-count nesting, quoted section names, no type
+coercion, comma-implies-list), `src/table.rs` (CSV reader with pandas dtype inference,
+rules *measured* against pandas 2.2.3). `parity/check_parity.py` diffs all of it against
+live configobj and pandas: 3/3.
 
-- `src/cli.rs` — clap mirror of the Python argparse surface (same flags, defaults, arity),
-  including the exact invocation the golden harness uses.
-- `src/config.rs` — configobj-compatible parser. Nests by bracket count, unquotes section
-  names so a site name keeps its commas, and reproduces the two behaviours that silently
-  break `[override]` matching if missed: **no type coercion** (`0` is the string `"0"`)
-  and **comma-implies-list**.
-- `src/table.rs` — CSV reader with pandas dtype inference. Rules were *measured* against
-  pandas 2.2.3, not assumed. Several were not in the plan's first draft: `'None'` is an NA
-  sentinel, `True`/`False` infer `bool`, leading zeros are lost to `int64`, and an integer
-  past i64 stays `object` rather than falling back to float.
-- `src/main.rs` — Phase 1 entry point plus a hidden `--dump-parity` mode. Exits non-zero
-  saying the pipeline is unimplemented rather than pretending otherwise.
-- `parity/check_parity.py` — differential check against **live** configobj and pandas.
-  Currently: config 59 lines, sadr 124, sh2101_calib 119 — all byte-identical.
+**Phase 2 — complete, 2026-09-08.** All six pipeline steps are byte-identical to the
+Python oracle on both fixtures: **465 lines (sadr) and 450 lines (sh2101_calib), every
+column, every cell, column order and row order included.** Verify with
+`python3 parity/check_steps.py` (needs `cargo build` first).
 
-**Phase 2 groundwork** (commits `585446b`, `8133b1a`)
+- `src/dump.rs` + `--dump-steps` — the Rust half of the per-step oracle, emitting the
+  exact byte sequence `parity/dump_steps.py` produces. Columns go out in **frame order,
+  never sorted**; a sorted dump cannot see a column-ordering bug, and column order is
+  load-bearing here.
+- `src/appconfig.rs`, `src/constants.rs`, `src/datetime.rs`, `src/steps/*` — the typed
+  config layer and the six steps as pure `Table -> Table` functions.
+- `parity/check_steps.py` — runs both dumps and prefix-diffs them. `parity/narrow.py`
+  localises a mismatch to individual rows (a column is one line of up to 1693 values, so
+  plain `diff` names the column and nothing else).
 
-- `parity/dump_steps.py` — the per-step oracle. Walks the Python pipeline in-process and
-  emits each step's frame as canonical `STEP/name/column/dtype/values` lines, floats as raw
-  IEEE-754 hex bits.
-- `src/numeric.rs` — `python_round` (CPython builtin, decimal ties-to-even) **and**
-  `numpy_round` (multiply–rint–divide on the binary double). Verified against the five
-  boundary values in the upstream `REMEDIATION_PLAN.md` A12.
-- `PORT_PLAN.md` — hazard 3 extended with the four-call-site rounding table (below).
+**Four findings that changed the plan, all measured, all now in `PORT_PLAN.md`:**
 
-**Two findings that changed the plan, both verified not assumed:**
+1. **pandas' CSV float converter is not correctly rounded and Rust's is** (hazard 14b).
+   `read_csv`'s default `float_precision=None` selects `precise_xstrtod`: 17 significant
+   digits into a double, then one tabulated power-of-ten scaling. 62 of 221 `FWHM` values
+   in `sadr_raw.csv` differed by an ULP. Transcribed in `table.rs::precise_xstrtod`.
+   `pd.to_numeric` shares that converter; a bare `float()` in Python source does **not**
+   (`steps::to_numeric` vs `steps::python_float` — the distinction is per call site).
+2. **Grouped `mean` is Kahan-compensated**, in row order — not the pairwise summation of
+   `Series.mean()`/`np.mean()` (hazard 4). Live in the GPS cluster centroids and in nine
+   aggregation columns.
+3. **Both rounding algorithms are live** (hazard 3): builtin `round` for HFR/IMSCALE/FWHM,
+   numpy's for `exposure`/`gain`, and one of each on either side of the site-lookup
+   equality in `geocode.rs`.
+4. **The `--debug` per-step CSVs are a lossy oracle — do not use them.** `to_csv` →
+   `read_csv` destroys exactly what this port must get right. Use `parity/dump_steps.py`.
 
-1. **The `--debug` per-step CSVs are a lossy oracle — do not use them.** `to_csv` →
-   `read_csv` destroys exactly what this port must get right. Measured on `debug_step_01`
-   for sadr: `rotname` is `object`/`'None'` in memory but `float64`/all-NaN through the CSV;
-   `useobsdate` is `object`/`'False'` in memory but `bool` through the CSV. Both sides of
-   such a comparison end up equally corrupted — false agreement, undetectable. Use
-   `parity/dump_steps.py`.
-2. **Both rounding algorithms are live.** The plan originally documented only the builtin.
-
-   | Call site | Call | Algorithm |
-   |---|---|---|
-   | `optical.py::_python_round` (HFR, IMSCALE, FWHM) | `round(x, 2)` | builtin |
-   | `base.py` Stage 7, `exposure` | `.round(2)` | pandas/numpy |
-   | `base.py` Stage 7, `gain` | `.round()` then `astype(int)` | pandas/numpy |
-   | `geocode.py::_find_site_in_db` | `db_lat.round(p)` vs `round(lat, p)` | **one of each**, either side of one equality |
-
-**Data-model decision (deviates from `PORT_PLAN.md`):** use the dynamic column-oriented
-`Table`, not the plan's suggested `Vec<Frame>` struct. Reason: `[defaults]`, `[override]`
-and `[equipmentoverrides]` let a user *create* arbitrary columns from config, so the carrier
-must tolerate arbitrary names. (Not because 72 columns survive step 1 — those passthrough
-columns die at aggregation and never reach the output.) Add typed accessors for known
-columns so step logic isn't stringly-typed. **This deviation is not yet written into
-`PORT_PLAN.md`'s data-layer section — do that.**
+**Data-model decision** (now written into `PORT_PLAN.md`'s data-layer section): the
+dynamic column-oriented `Table`, not the plan's original `Vec<Frame>`. `[defaults]`,
+`[override]` and `[equipmentoverrides]` let a user *create* arbitrary columns, so the
+frame's shape is user-defined. Every row operation — filter, `concat`, `groupby`
+reordering — reduces to `Table::take_rows(&[usize])`, which keeps row order explicit.
 
 ## 🚧 Current Blockers & Technical Debt
 
-- **Nothing blocking.** Builds clean, 23 tests pass, parity checks pass.
-- `parity/` holds **copies** of the upstream golden corpus so this repo tests standalone.
-  `parity/CORPUS.md` records provenance (`AstroBinUploader@d2f61bc`, `v2.1.1`). If the
-  Python side ever re-blesses its references, re-copy and update that file.
-- **`golden_tests/fixtures/binary/` does not exist upstream.** `PORT_PLAN.md` Phase 4 says
-  to validate FITS/XISF readers against synthetic binary fixtures from the upstream P0 plan;
-  those were never built. Phase 4 must build them first, including a tile-compressed
-  `.fits.fz` case.
-- **Upstream tracker is clear** (done 2026-09-07): issues #3/#4/#5/#6/#11 and PRs #8/#13
-  closed. Only #9 and #10 remain open, pending a re-test against the reporter's data.
-  `"Bash(gh:*)"` is now in `autoMode.allow`, so `gh` writes work.
+- **Nothing blocking.** Builds clean with no warnings, 82 tests pass, both parity harnesses
+  green. **Nothing is pushed** — four commits sit on local `main` ahead of `origin`.
+- Two paths are deliberately narrow because no fixture reaches them, and both say so in
+  code rather than pretending otherwise:
+  - `normalize.rs::parse_iso_datetime` / `datetime.rs::parse` handle ISO-8601 only. The
+    master-preference DATE-OBS tie-break needs two masters in one hardware group; neither
+    fixture has that.
+  - `steps::promote` resolves only same-dtype and int/float mixes. Anything mixing a
+    string with a number would be an `object` column in pandas, and rendering numbers into
+    one means reproducing Python's `repr` — worth doing when a fixture needs it.
+- `parity/` holds **copies** of the upstream golden corpus (`parity/CORPUS.md` records
+  provenance: `AstroBinUploader@d2f61bc`, `v2.1.1`). If the Python side ever re-blesses its
+  references, re-copy and update that file.
+- **`golden_tests/fixtures/binary/` does not exist upstream.** Phase 4 must build it first,
+  including a tile-compressed `.fits.fz` case.
+- Upstream tracker is clear; issues #9 and #10 remain open pending a re-test against the
+  reporter's data.
 - The user is **content** that their home address appears in the public upstream repo's
-  golden references (it is the reverse-geocoded FITS GPS). Do not raise it again.
+  golden references. Do not raise it again.
 
 ## 🚀 Next Steps
 
-Phase 2: the six pipeline steps as pure functions. Split into **two commits** — steps 1–3,
-then steps 4–6 — rather than one large one.
+**Phase 3: the exporter and `reports.py` — the byte-parity grind, and where hazard 1
+lives** (`acq_df.to_string()` appended to the summary: pandas' own column-width and
+float-repr rules, reproduced exactly). Read hazards 1, 5 and 6 in `PORT_PLAN.md` first.
 
-1. **Dump both fixtures first.** `sadr` does **not** exercise steps 3 or 4 (dedup drops
-   nothing; it has zero calibration frames, so step 4 just adds four zero columns and
-   matches trivially). Only `sh2101_calib` tests those meaningfully:
-   ```
-   python3 parity/dump_steps.py parity/fixtures/sadr_raw.csv         parity/golden_config.ini > /tmp/py_sadr.txt
-   python3 parity/dump_steps.py parity/fixtures/sh2101_calib_raw.csv parity/golden_config.ini > /tmp/py_sh2101.txt
-   ```
-2. **Build the Rust side of the oracle**: a typed `AppConfig` (defaults / overrides /
-   equipment_overrides / filters / sites / use_obs_date), `Table` mutation ops
-   (insert, drop, rename, coalesce-duplicates, row-mask select, concat), and a
-   `--dump-steps` flag emitting the identical canonical form. Then diff.
-3. **Implement `NormalizeHeadersStep`** — the largest single step, seven stages. All
-   semantics have been read; the ones easy to get wrong:
-   - Stage 2 lowercases column names, then coalesces duplicates — and the coalesce
-     **sorts the columns**, but *only when duplicates exist*. No duplicates ⇒ original order.
-   - Stage 3 injects a default only if the lowercased key is still absent (A8 ordering).
-   - Stage 3b applies `[equipmentoverrides]` **after** defaults, overwriting the whole column.
-   - Stage 5 (master preference) recombines as `concat([lights, cals], ignore_index=True)`,
-     which **reorders rows** — all lights first, then calibration frames.
-   - Stage 6 applies the IMAGETYP keyword map **longest-keyword-first** against a *frozen*
-     copy of the column, with an `assigned` mask so each row is rewritten once (this is A13).
-   - Stage 7 hardening is asymmetric: a float list via `astype(float)`, `exposure` via
-     pandas `.round(2)`, `gain` via pandas `.round()` + `astype(int)`, `number` via
-     `fillna(1).astype(int)`, `site` via `astype(str).replace('nan', default)`.
-4. Then `OpticalParameterStep` (uses `python_round`) and `DeduplicateStep` (anchored WBPP
-   regex; key is `(dirname(source_path), base_filename)` with a documented fallback when
-   `SOURCE_PATH` is absent — **sadr exercises that fallback, sh2101_calib the normal path**).
-5. Record the `Table`-over-`Vec<Frame>` deviation in `PORT_PLAN.md`'s data-layer section.
+The method that worked for Phase 2 transfers directly, and is worth repeating:
+
+1. **Get the oracle emitting the target before writing any logic**, then diff. Doing
+   `00_raw` alone first is what isolated the `precise_xstrtod` finding instead of leaving
+   it tangled inside stage 7.
+2. **Add one unit at a time and diff after each.** Every step landed first-try after the
+   float fix, because each diff had exactly one candidate cause.
+3. **Diff strictly** (line-for-line over the emitted prefix), not just per-column — that is
+   what proves column order.
+4. Phase 3 has no per-step dump to lean on: the oracle is the committed
+   `parity/references/*_summary.txt` and `*_acquisition.csv`. Start by making the binary
+   produce the acquisition CSV from the aggregated frame and diffing against
+   `parity/references/sadr_acquisition.csv`; the summary, with its `to_string()` table, is
+   the harder half and should come second.
+
+Then Phase 4 (FITS/XISF readers, needs the binary fixtures built), 5 (rayon, release
+matrix), 6 (differential harness in CI).
 
 ## 📂 Files to Load
 
-- `PORT_PLAN.md` — plan of record. Hazards 2, 3, 10–14 are the ones Phase 2 touches.
-- `parity/dump_steps.py` — the oracle, and its docstring explains why the `--debug` CSVs
-  cannot be used.
-- `src/table.rs` — the data carrier Phase 2 extends.
-- `src/numeric.rs` — the two rounding helpers and which call sites use which.
-- `src/config.rs` — parsed config; Phase 2 needs the typed `AppConfig` layered on top.
-- Upstream, read alongside: `../AstroBinUploader/engine/steps/base.py` (all seven stages),
-  then `optical.py`, `deduplicate.py`, `calibration.py` (lines 40–125: `create_hybrid_key`
-  gain handshake and `is_orphaned`), `geocode.py`, `aggregate.py`.
+- `PORT_PLAN.md` — plan of record. Phase 3 touches hazards 1, 5, 6.
+- `parity/check_steps.py` — run first to confirm the starting state is green.
+- `src/steps/aggregate.rs` — produces the frame Phase 3 formats; its rules list is the
+  column order of the export.
+- `src/dump.rs` — the canonical form, and why nothing in it is sorted.
+- Upstream, read alongside: `../AstroBinUploader/engine/exporter.py` and
+  `engine/reports.py`.
