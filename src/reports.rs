@@ -828,4 +828,31 @@ mod tests {
         assert!(text.contains("\n BIAS:\n"), "{text}");
         assert!(!text.contains("BIASS"), "{text}");
     }
+
+    /// Upstream issue #9 (github.com/SteveGreaves/AstroBinUploader): two
+    /// MASTERDARK files at the same gain but different exposures (180s and
+    /// 600s -- the reporter's own example) merged into one calibration
+    /// table row, showing one exposure and a combined frame count. Darks
+    /// are filter-independent, so their group key is (gain, duration) --
+    /// duration was already part of it, and the merge did not reproduce
+    /// when checked directly: verified end to end against live Python
+    /// v2.1.2 with a --test CSV built from the report's own numbers
+    /// (32 subs at 180s, 24 at 600s) before this test was written, so this
+    /// pins the same behaviour the oracle already confirmed rather than an
+    /// assumption about what the fix should look like.
+    #[test]
+    fn github_issue_9_different_exposure_masters_stay_separate() {
+        let t = cal_table(&[
+            "MASTERDARK,,,100,1.0,180.0,32",
+            "MASTERDARK,,,100,1.0,600.0,24",
+        ]);
+        let (text, total_exposure) = format_image_type_table(&t, &[0, 1], "DARK", None, None);
+        assert!(text.contains("32"), "{text}");
+        assert!(text.contains("180.00 secs"), "{text}");
+        assert!(text.contains("24"), "{text}");
+        assert!(text.contains("600.00 secs"), "{text}");
+        // 32*180 + 24*600 = 5760 + 14400 = 20160, not a merged single row's
+        // worth of exposure.
+        assert_eq!(total_exposure, 20160.0);
+    }
 }
