@@ -36,7 +36,7 @@ UPSTREAM_FIXTURES = [
     ("sadr", HERE / "fixtures" / "sadr_raw.csv"),
     ("sh2101_calib", HERE / "fixtures" / "sh2101_calib_raw.csv"),
 ]
-# Fixtures captured for this port and blessed against live Python v2.1.1.
+# Fixtures captured for this port and blessed against live Python v2.1.2.
 # They have no upstream counterpart, so the staleness check must not look for
 # one; parity/CORPUS.md records where each came from.
 LOCAL_FIXTURES = [
@@ -49,7 +49,7 @@ CONFIG = HERE / "golden_config.ini"
 # The oracle runs the *live* Python pipeline, so the checkout it imports is as
 # much a part of the baseline as the fixtures are -- and unlike the fixtures,
 # nothing here is a committed copy. Both are verified below.
-PARITY_TARGET = "2.1.1"
+PARITY_TARGET = "2.1.2"
 PYTHON = os.environ.get(
     "ASTROBIN_PYTHON", "/mnt/raid0/Code/venvs/.astrovenv/bin/python3"
 )

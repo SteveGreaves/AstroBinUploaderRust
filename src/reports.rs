@@ -536,12 +536,35 @@ fn format_image_type_table(
         }
     } else {
         let upper = imagetype.to_uppercase();
-        let display_label = match upper.as_str() {
-            "DARK" | "MASTERDARK" => "MASTERDARKS".to_string(),
-            "FLAT" | "MASTERFLAT" => "MASTERFLATS".to_string(),
-            "BIAS" | "MASTERBIAS" => "MASTERBIAS".to_string(),
-            "DARKFLAT" | "MASTERDARKFLAT" => "MASTERDARKFLATS".to_string(),
-            other => format!("MASTER{other}S"),
+        // The label reflects what this table actually contains, not a blind
+        // lookup keyed on the category's base type (Python v2.1.1 <= 2.1.1
+        // hazard, fixed upstream in v2.1.2: every calibration section used
+        // to read MASTERxxx unconditionally, including a session built
+        // entirely from raw, uncalibrated frames with no master anywhere).
+        // `imagetype` is always the category's base (raw) type -- every
+        // `order` tuple in `generate_full_summary` is (raw, MASTER_raw) --
+        // so pluralising it needs the same BIAS exception the old lookup
+        // encoded: "BIAS" takes no extra S, every other type does.
+        let plain_label = if upper == "BIAS" {
+            upper.clone()
+        } else {
+            format!("{upper}S")
+        };
+        let has_master = t
+            .column(col::IMAGE_TYPE)
+            .map(|c| {
+                group
+                    .iter()
+                    .any(|&i| astype_str(&c.cells[i]).to_uppercase().starts_with("MASTER"))
+            })
+            .unwrap_or(false);
+        // A genuinely mixed table (a master covering one gain, raw frames
+        // surviving for another the master doesn't cover) favours MASTER --
+        // the safer thing to over-claim toward when the table isn't uniform.
+        let display_label = if has_master {
+            format!("MASTER{plain_label}")
+        } else {
+            plain_label
         };
         lines.push(format!("\n {display_label}:\n"));
         lines.push(row_fmt(
@@ -703,6 +726,7 @@ pub fn generate_full_summary(df: &Table, total_scanned: usize, now: &str) -> Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::table::{Column, DType};
 
     #[test]
     fn hms_aligned_pads_each_field_to_six() {
@@ -744,5 +768,64 @@ mod tests {
         let t = Table::parse_str("object\nSh2 101\nSh2 101\n").unwrap();
         assert_eq!(get_target_details(&t, &[0, 1]), " Target: Sh2 101");
         assert_eq!(get_target_details(&t, &[]), " Target: No target data");
+    }
+
+    /// A calibration frame with just enough columns for
+    /// `format_image_type_table`'s non-LIGHT branch.
+    fn cal_row(imagetyp: &str) -> String {
+        format!("{imagetyp},Ha,4663,100,0.25,600.0,10")
+    }
+
+    fn cal_table(rows: &[&str]) -> Table {
+        let header = "imagetyp,filter,filter_code,gain,egain,exposure,number";
+        let mut text = String::from(header);
+        for r in rows {
+            text.push('\n');
+            text.push_str(r);
+        }
+        text.push('\n');
+        let mut t = Table::parse_str(&text).unwrap();
+        // gain_match is normally CalibrationMatcherStep's output; the label
+        // logic under test never reads it directly, but format_image_type_table
+        // does when light_gains/light_filters are Some, so give every row the
+        // same key and pass None for both filters to skip that path.
+        t.set_column(
+            col::GAIN_MATCH,
+            Column {
+                name: col::GAIN_MATCH.into(),
+                dtype: DType::Str,
+                cells: vec![Cell::Str("G_100".into()); t.n_rows],
+            },
+        );
+        t
+    }
+
+    /// PORT_PLAN.md / CHANGELOG.md 2.1.2: the label reflects what the table
+    /// actually contains, not a blind lookup on the category's base type.
+    #[test]
+    fn calibration_section_label_reflects_what_is_actually_in_the_table() {
+        // Pure raw: every DARK row, no MASTER anywhere -- plain label.
+        let raw = cal_table(&[&cal_row("DARK"), &cal_row("DARK")]);
+        let (text, _) = format_image_type_table(&raw, &[0, 1], "DARK", None, None);
+        assert!(text.contains("\n DARKS:\n"), "{text}");
+        assert!(!text.contains("MASTERDARKS"), "{text}");
+
+        // Pure master -- MASTER label.
+        let master = cal_table(&[&cal_row("MASTERDARK"), &cal_row("MASTERDARK")]);
+        let (text, _) = format_image_type_table(&master, &[0, 1], "DARK", None, None);
+        assert!(text.contains("\n MASTERDARKS:\n"), "{text}");
+
+        // Mixed: a real master alongside a surviving raw frame -- MASTER
+        // label, the safer thing to over-claim toward on a non-uniform table.
+        let mixed = cal_table(&[&cal_row("MASTERDARK"), &cal_row("DARK")]);
+        let (text, _) = format_image_type_table(&mixed, &[0, 1], "DARK", None, None);
+        assert!(text.contains("\n MASTERDARKS:\n"), "{text}");
+
+        // BIAS takes no extra S, matching the label the old lookup table
+        // also used ('MASTERBIAS', never 'MASTERBIASS').
+        let bias = cal_table(&[&cal_row("BIAS")]);
+        let (text, _) = format_image_type_table(&bias, &[0], "BIAS", None, None);
+        assert!(text.contains("\n BIAS:\n"), "{text}");
+        assert!(!text.contains("BIASS"), "{text}");
     }
 }

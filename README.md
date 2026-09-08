@@ -14,7 +14,7 @@ depends on `clap`, `anyhow`, `chrono` and `roxmltree`.
 ## Status: Phase 5 of 6
 
 Functionally complete and released for five platforms: a directory of
-FITS/XISF frames in, both artifacts out, byte-identical to Python v2.1.1, with
+FITS/XISF frames in, both artifacts out, byte-identical to Python v2.1.2, with
 `rayon` parallelism on the disk scan and a CI-verified build for Linux
 (`musl`, static), Windows (x86-64 and arm64) and macOS (x86-64 and arm64).
 
@@ -40,7 +40,7 @@ the ranked hazard list.
 ## The parity contract
 
 > The Rust binary reproduces, byte for byte, the `*_acquisition.csv` and
-> `*_session_summary.txt` produced by Python **v2.1.1** for every fixture in
+> `*_session_summary.txt` produced by Python **v2.1.2** for every fixture in
 > `parity/fixtures/`, with the sole exception of the `Generated <timestamp>`
 > line.
 

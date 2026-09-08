@@ -6,6 +6,10 @@
 > (GitHub #3/#5/#6). What that changed here:
 >
 > - The parity target is **`v2.1.1`**, not `v2.1.0` and certainly not `v2.0.3`.
+>   (Bumped again to **`v2.1.2`** on 2026-09-08 — see the note at the top of
+>   `parity/CORPUS.md`: a real mislabeling bug, found by running this port
+>   against unstructured real data rather than the corpus, fixed upstream
+>   first and ported here identically.)
 > - `geopy` is **gone** from the Python side — `GeocodeStep` now hand-rolls a
 >   specific haversine. The Rust port must reproduce *that* formula, not reach
 >   for a crate (dependency table below, hazard 11).
@@ -33,7 +37,8 @@ Two honest caveats, stated up front rather than buried:
    yields in completion order, `sort_values` was unstable), so it had no single
    well-defined output to be exact *against*. **Settled:** Bucket A/B and the
    issue-tracker follow-ups are all fixed and merged; the corpus is
-   regenerated; **`v2.1.1` is tagged on `main`** and is the contract.
+   regenerated; **`v2.1.1` is tagged on `main`** and is the contract — later
+   bumped to **`v2.1.2`**, see above.
 2. **One output block is expensive to match byte-for-byte** — the
    `pandas.DataFrame.to_string()` table appended to the bottom of the session
    summary. It is emulable, but it is the single largest risk item in the
@@ -47,13 +52,15 @@ CSV, the entire structured part of the text report — is mechanical.
 ## Parity contract
 
 > The Rust binary reproduces, byte for byte, the `*_acquisition.csv` and
-> `*_session_summary.txt` produced by Python `v2.1.1` for every fixture in
+> `*_session_summary.txt` produced by Python **`v2.1.2`** for every fixture in
 > `golden_tests/fixtures/`, with the sole exception of the
 > `Generated <timestamp>` line.
 >
-> Pin the target by reading the code **at the `v2.1.1` tag**, not by trusting a
+> Pin the target by reading the code **at the current tag**, not by trusting a
 > green differential diff — see hazard 13: config-driven behaviour the
-> two-fixture corpus does not exercise.
+> committed corpus does not exercise. `parity/check_steps.py`'s
+> `check_oracle()` enforces this automatically: it refuses to run against a
+> sibling checkout at any other version.
 
 Both implementations run under the **committed** `golden_tests/golden_config.ini`,
 passed via `--config`. This is not incidental: until 2026-09-07 the harness used

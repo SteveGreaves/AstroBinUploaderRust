@@ -118,6 +118,28 @@ skipped); `01` and `02` find `IMAGETYP` on HDUs 1 and 2 respectively; `03`
 finds none and falls back to HDU 0; `04` reads `NUMBER = 50` out of repeated
 HISTORY cards; `05` has its quotes and padding stripped.
 
+## Parity target bumped to v2.1.2 (2026-09-08)
+
+Found while validating this port against the maintainer's own real,
+unstructured data (not the corpus): every calibration section in the session
+summary was labelled `MASTERxxx` unconditionally, even for a session built
+entirely from raw `DARK`/`FLAT`/`BIAS` frames with no master anywhere. Fixed
+upstream in Python `v2.1.2` (`engine/reports.py::format_image_type_table`)
+and ported to `src/reports.rs` identically — see `CHANGELOG.md`'s `[2.1.2]`
+entry in the Python repo for the full account, including the check against
+the actual v1.4.7 source (still on disk in an old install) that the removed
+code's own comment claimed to be following and wasn't.
+
+`check_steps.py`'s `PARITY_TARGET` is now `"2.1.2"`. `sh2101_calib_summary.txt`
+was re-copied from upstream (all-raw calibration data, so the three sections
+that used to read `MASTERFLATS:`/`MASTERBIAS:`/`MASTERDARKS:` now correctly
+read `FLATS:`/`BIAS:`/`DARKS:`); `sadr_summary.txt` was re-copied too but only
+its `Generated` line changed (`sadr` carries no calibration frames at all).
+`mosaic_summary.txt` — a local fixture, no upstream counterpart — was
+re-blessed the same way, for the same reason (also all-raw). `xisf_mixed` and
+`synthetic` in the binary corpus needed no change: neither is all-raw, so the
+label was already `MASTERxxx` correctly before and after.
+
 ## Not yet covered by any fixture
 
 - **`DARKFLAT` / `MASTERDARKFLATS`.** 200 darkflat frames exist at

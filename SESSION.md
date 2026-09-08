@@ -17,6 +17,22 @@ and fourteen ranked parity hazards. Read it before writing code.
 
 ## ✅ Completed Work
 
+**Post-Phase-5 fix, 2026-09-08 — parity target bumped to v2.1.2.** Running the port against
+the user's real, unstructured PixInsight/calibration directories (not the corpus) surfaced a
+real bug: every calibration section in the session summary read `MASTERxxx` unconditionally,
+even for a session built entirely from raw `DARK`/`FLAT`/`BIAS` frames. Traced to Python, not
+Rust — confirmed with the live oracle on the user's exact data before touching any code — then
+traced *inside* Python to a comment that claimed "v1.4.7 standards" for behaviour the actual
+v1.4.7 source (still on disk in an old install) never had: v1.4.7 labelled each section by its
+literal `IMAGETYP`, plain `DARK:` for raw frames, `MASTERDARK:` only for genuine masters.
+
+Fixed upstream first (Python `v2.1.2`, `engine/reports.py::format_image_type_table`, both
+golden fixtures re-blessed, `pytest` green), then ported the identical fix to `src/reports.rs`.
+`PARITY_TARGET` in `check_steps.py` and every version pin in this repo (`Cargo.toml`, this
+file, `README.md`, `PORT_PLAN.md`, `parity/CORPUS.md`) now say `2.1.2`. `parity/CORPUS.md` has
+the full account of what was re-blessed and why. Verified on the user's exact real command
+after the fix.
+
 **Phase 1 — complete** (`77c2eb9`): `src/cli.rs` (clap mirror of argparse), `src/config.rs`
 (configobj-compatible parser), `src/table.rs` (CSV reader with pandas dtype inference,
 rules *measured* against pandas 2.2.3). `parity/check_parity.py`: 3/3.
