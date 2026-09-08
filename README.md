@@ -75,11 +75,14 @@ Two more harnesses sit on top of it, and all three must stay green:
 ```
 $ python3 parity/check_steps.py      # every pipeline step, cell by cell
 [PASS] sadr: 465 lines identical  (00_raw, 01_NormalizeHeadersStep, ...)
-[PASS] sh2101_calib: 450 lines identical  (00_raw, 01_NormalizeHeadersStep, ...)
+[PASS] sh2101_calib: 450 lines identical  (00_raw, ...)
+[PASS] mosaic: 444 lines identical  (00_raw, ...)
+[PASS] lbn548: 450 lines identical  (00_raw, ...)
 
 $ python3 parity/check_reports.py    # the two output artifacts
 [PASS] sadr: both artifacts byte-identical; temperature statistics bit-identical over 1 site(s)
-[PASS] sh2101_calib: both artifacts byte-identical; temperature statistics bit-identical over 1 site(s)
+...
+4/4 fixture(s) passed.
 ```
 
 `check_steps.py` compares the live Python pipeline's frames against this

@@ -1,5 +1,5 @@
 Observation session summary
-Generated 2026-02-11 14:10:44
+Generated 2026-09-08 18:16:40
  Target: NGC 6997 4 Panel Mosaic
 
 Site: Norton Close, Papworth Everard, South Cambridgeshire, Cambridgeshire, Cambridgeshire and Peterborough, England, CB23 3XT, United Kingdom
@@ -82,7 +82,7 @@ Total FLAT Exposure Time: 0 hrs 1 mins 54.00 secs
  MASTERBIAS:
 
  Filter     Frames   Gain       Egain           Exposure     Total Exposure 
- Ha         100      100        0.25 e/ADU      0.00 secs         0 hrs      0 mins   0.00 secs
+            100      100        0.25 e/ADU      0.00 secs         0 hrs      0 mins   0.00 secs
 
 Total BIAS Exposure Time: 0 hrs 0 mins 0.00 secs
 
@@ -90,7 +90,7 @@ Total BIAS Exposure Time: 0 hrs 0 mins 0.00 secs
  MASTERDARKS:
 
  Filter     Frames   Gain       Egain           Exposure     Total Exposure 
- Ha         51       100        0.25 e/ADU      600.00 secs       8 hrs     30 mins   0.00 secs
+            51       100        0.25 e/ADU      600.00 secs       8 hrs     30 mins   0.00 secs
 
 Total DARK Exposure Time: 8 hrs 30 mins 0.00 secs
 

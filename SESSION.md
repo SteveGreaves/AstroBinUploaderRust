@@ -64,7 +64,8 @@ are live in this codebase (hazard 3) and `exporter::tests` pins the distinction.
 ## 🚧 Current Blockers & Technical Debt
 
 - **Nothing blocking.** Builds clean with no warnings, 104 tests pass, all three parity
-  harnesses green (`check_parity.py`, `check_steps.py`, `check_reports.py`).
+  harnesses green over all four fixtures (`check_parity.py` 5/5, `check_steps.py` 4/4,
+  `check_reports.py` 4/4).
 - New dependency: **`chrono`** (`clock` feature only), for the `Generated <timestamp>`
   line in local time. Chosen over `libc::localtime_r` because Phase 5's release matrix
   includes Windows, where that function does not exist.
@@ -78,13 +79,19 @@ are live in this codebase (hazard 3) and `exporter::tests` pins the distinction.
     unexercised by the corpus.
   - `reports.rs`'s `'No Filter'`/`'None'` → blank substitution in the flat tables is
     unexercised: every MASTERFLAT row in `sh2101_calib` carries a real filter.
-- `parity/references/` holds **eight** reference pairs but only **two** have replayable
-  fixtures. Of the six orphans, `flame_summary.txt` is stale — it shows a `0.10 dB`
-  gain and a `Total MASTERFLAT Exposure Time:` label, neither of which v2.1.1 can
-  produce. The other five (`alpha`, `lbn548`, `lbn548_31may`, `michael`, `mosaic`) are
-  consistent with v2.1.1 and were used as read-only evidence for the mosaic-detection
-  and missing-equipment branches. None of the eight exercises `DARKFLAT`, a multi-site
-  session, or a blank filter in a flat table.
+- **The corpus is now four fixtures, every one replayable** (2026-09-08). `mosaic`
+  (1544 rows, four-panel mosaic, all three master tables) and `lbn548` (270 rows,
+  lights only, no calibration at all) were captured from the user's data and blessed
+  against live v2.1.1; the four unverifiable orphan references were deleted.
+  `mosaic_summary.txt` was re-blessed, not removed — the committed copy predated
+  remediation A14 and showed `Ha` on MASTERDARKS/MASTERBIAS rows where v2.1.1 leaves
+  the filter blank. `parity/CORPUS.md` records all of it, including which half of the
+  corpus is an upstream copy (`check_steps.py::UPSTREAM_FIXTURES`, staleness-checked)
+  and which is local (`LOCAL_FIXTURES`, deliberately not).
+- Still uncovered by any fixture: **`DARKFLAT`/`MASTERDARKFLATS`** (200 frames exist at
+  `Preselected/Calibration data/24th February 2022/FlatWizard/`, but they need a
+  same-era lights set to pair with), a **multi-site session** — the site loop has never
+  run twice — and a **blank filter in a flat table**.
 - `main.rs::py_basename` is POSIX-only: it splits on `/` alone, matching
   `posixpath.basename`. On Windows, Python would use `ntpath.basename` and split on
   `\` and the drive letter too, so `C:\data\Sadr --test ...` would name its outputs

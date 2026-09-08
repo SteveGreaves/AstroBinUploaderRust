@@ -29,10 +29,21 @@ import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent
-FIXTURES = [
+# Fixtures copied from the Python project's own golden_tests/ -- these are
+# verified still identical to it below, because a silent drift there would
+# move the baseline without moving the reference.
+UPSTREAM_FIXTURES = [
     ("sadr", HERE / "fixtures" / "sadr_raw.csv"),
     ("sh2101_calib", HERE / "fixtures" / "sh2101_calib_raw.csv"),
 ]
+# Fixtures captured for this port and blessed against live Python v2.1.1.
+# They have no upstream counterpart, so the staleness check must not look for
+# one; parity/CORPUS.md records where each came from.
+LOCAL_FIXTURES = [
+    ("mosaic", HERE / "fixtures" / "mosaic_raw.csv"),
+    ("lbn548", HERE / "fixtures" / "lbn548_raw.csv"),
+]
+FIXTURES = UPSTREAM_FIXTURES + LOCAL_FIXTURES
 CONFIG = HERE / "golden_config.ini"
 
 # The oracle runs the *live* Python pipeline, so the checkout it imports is as
@@ -75,7 +86,7 @@ def check_oracle(repo: pathlib.Path) -> list:
 
     upstream = repo / "golden_tests"
     pairs = [(CONFIG, upstream / "golden_config.ini")]
-    pairs += [(f, upstream / "fixtures" / f.name) for _, f in FIXTURES]
+    pairs += [(f, upstream / "fixtures" / f.name) for _, f in UPSTREAM_FIXTURES]
     for ours, theirs in pairs:
         if not theirs.exists():
             problems.append(f"upstream copy missing: {theirs}")
