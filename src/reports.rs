@@ -26,7 +26,7 @@ use std::collections::HashSet;
 
 use crate::constants as col;
 use crate::constants::image_type as it;
-use crate::steps::{astype_str, kahan_mean, pairwise_mean, to_numeric};
+use crate::steps::{astype_str, kahan_mean, kahan_sum, pairwise_mean, to_numeric};
 use crate::table::{Cell, Table};
 
 /// `f"{x:.Nf}"`. Rust prints `NaN` where Python prints `nan`; every other
@@ -182,10 +182,16 @@ fn numeric_at(t: &Table, name: &str, rows: &[usize]) -> Vec<f64> {
     }
 }
 
-/// `Series.sum()` over an int64 column — `number` is hardened to int64
-/// upstream, so the frame count is an exact integer, never a float fold.
+/// `int(group[NUMBER].sum())` — the sum first, the truncation **once**, at
+/// the end.
+///
+/// Stage 7 hardens `number` to int64 unconditionally, so this only ever adds
+/// whole numbers today. Truncating per element would be indistinguishable
+/// until it wasn't: `[1.5, 1.5]` sums to `3` in Python and would give `2`
+/// here. `aggregate.rs`'s `Rule::Sum` guards the same unreachable case for
+/// the same reason, and the two sum sites should not disagree about it.
 fn int_sum(t: &Table, name: &str, rows: &[usize]) -> i64 {
-    numeric_at(t, name, rows).into_iter().map(|v| v as i64).sum()
+    kahan_sum(numeric_at(t, name, rows)) as i64
 }
 
 /// `Series.mean()` — pairwise, over the NA-as-zero values of the *whole*

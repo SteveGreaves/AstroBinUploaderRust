@@ -318,6 +318,30 @@ mod tests {
         assert_eq!(to_string_index_false(&t), "vvvvvv\n    ab");
     }
 
+    /// A bool column is `is_numeric_dtype` in pandas, so it gets the header's
+    /// leading space — but its *values* go through the generic formatter, not
+    /// the integer one, and render as `True`/`False`. Measured on pandas
+    /// 2.2.3; reachable through `[defaults]`, since `table.rs` infers
+    /// `True`/`False` as bool.
+    #[test]
+    fn a_bool_column_takes_the_numeric_header_space_and_the_generic_values() {
+        let t = table(vec![
+            col("b", DType::Bool, vec![Cell::Bool(true), Cell::Bool(false)]),
+            col("x", DType::Float, vec![Cell::Float(1.5), Cell::Float(2.0)]),
+            col(
+                "s",
+                DType::Str,
+                vec![Cell::Str("a".into()), Cell::Str("b".into())],
+            ),
+        ]);
+        assert_eq!(
+            to_string_index_false(&t),
+            "    b   x s\n True 1.5 a\nFalse 2.0 b"
+        );
+        let t = table(vec![col("bb", DType::Bool, vec![Cell::Bool(true)])]);
+        assert_eq!(to_string_index_false(&t), "  bb\nTrue");
+    }
+
     #[test]
     fn whole_floats_keep_exactly_one_decimal() {
         let t = table(vec![col(

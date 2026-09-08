@@ -63,7 +63,7 @@ are live in this codebase (hazard 3) and `exporter::tests` pins the distinction.
 
 ## 🚧 Current Blockers & Technical Debt
 
-- **Nothing blocking.** Builds clean with no warnings, 103 tests pass, all three parity
+- **Nothing blocking.** Builds clean with no warnings, 104 tests pass, all three parity
   harnesses green (`check_parity.py`, `check_steps.py`, `check_reports.py`).
 - New dependency: **`chrono`** (`clock` feature only), for the `Generated <timestamp>`
   line in local time. Chosen over `libc::localtime_r` because Phase 5's release matrix
@@ -85,6 +85,11 @@ are live in this codebase (hazard 3) and `exporter::tests` pins the distinction.
   consistent with v2.1.1 and were used as read-only evidence for the mosaic-detection
   and missing-equipment branches. None of the eight exercises `DARKFLAT`, a multi-site
   session, or a blank filter in a flat table.
+- `main.rs::py_basename` is POSIX-only: it splits on `/` alone, matching
+  `posixpath.basename`. On Windows, Python would use `ntpath.basename` and split on
+  `\` and the drive letter too, so `C:\data\Sadr --test ...` would name its outputs
+  differently under the two implementations. Harmless until Phase 5 ships Windows
+  binaries; fix it there.
 - **`golden_tests/fixtures/binary/` does not exist upstream.** Phase 4 must build it
   first, including a tile-compressed `.fits.fz` case.
 - Upstream tracker is clear; issues #9 and #10 remain open pending a re-test.

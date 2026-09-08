@@ -95,7 +95,7 @@ uses.
 
 ```sh
 cargo build --release      # target/release/astrobin-upload
-cargo test                 # 103 unit tests
+cargo test                 # 104 unit tests
 ```
 
 ## Corpus
