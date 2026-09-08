@@ -1,0 +1,81 @@
+name: Differential harness
+
+# PORT_PLAN.md's parity contract, checked in CI rather than only on this
+# machine: the four check_*.py scripts each run the live Python oracle and
+# this port side by side and byte-compare the result. Report-only by design
+# (PORT_PLAN.md decision 4 -- "the differential harness runs during
+# development and for one release of overlap, then retires", not permanent
+# infrastructure to gate merges with) and this repo pushes straight to main
+# with no PR workflow yet, so there is nothing for a blocking check to
+# usefully block. `continue-on-error` on every harness step keeps the job
+# green even on a genuine divergence -- the point is a visible red step and
+# an annotation, not a failed run someone has to re-trigger.
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  differential:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the Rust port
+        uses: actions/checkout@v4
+        with:
+          path: AstroBinUploaderRust
+
+      # Public repo (github.com/SteveGreaves/AstroBinUploader) -- no token
+      # needed. Checked out as a *sibling* directory of the Rust checkout,
+      # matching check_steps.py's own default
+      # (`PY_REPO = ... REPO.parent / "AstroBinUploader"`) exactly, so no
+      # ASTROBIN_PY_REPO override is needed either.
+      - name: Check out the Python oracle
+        uses: actions/checkout@v4
+        with:
+          repository: SteveGreaves/AstroBinUploader
+          path: AstroBinUploader
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the oracle's exact pinned dependencies
+        working-directory: AstroBinUploader
+        run: python3 -m pip install -r requirements.txt
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the port (debug -- what the harnesses use by default)
+        working-directory: AstroBinUploaderRust
+        run: cargo build
+
+      # python3 on PATH already has the oracle's dependencies installed
+      # above; ASTROBIN_PYTHON overrides check_steps.py's hardcoded default
+      # (a path specific to the maintainer's own machine).
+      - name: Config and dtype parity (check_parity.py)
+        working-directory: AstroBinUploaderRust
+        env:
+          ASTROBIN_PYTHON: python3
+        run: python3 parity/check_parity.py
+        continue-on-error: true
+
+      - name: Pipeline step parity, cell by cell (check_steps.py)
+        working-directory: AstroBinUploaderRust
+        env:
+          ASTROBIN_PYTHON: python3
+        run: python3 parity/check_steps.py
+        continue-on-error: true
+
+      - name: Exporter and report parity (check_reports.py)
+        working-directory: AstroBinUploaderRust
+        env:
+          ASTROBIN_PYTHON: python3
+        run: python3 parity/check_reports.py
+        continue-on-error: true
+
+      - name: FITS/XISF reader parity (check_readers.py)
+        working-directory: AstroBinUploaderRust
+        env:
+          ASTROBIN_PYTHON: python3
+        run: python3 parity/check_readers.py
+        continue-on-error: true
