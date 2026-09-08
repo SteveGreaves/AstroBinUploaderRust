@@ -1,0 +1,76 @@
+name: Release matrix
+
+# PORT_PLAN.md decision 2: five targets, no C runtime anywhere (the FITS
+# reader is hand-written specifically so this holds) -- musl gives a fully
+# static Linux binary, the rest link against each platform's own libc/CRT.
+#
+# Manual trigger for now (`gh workflow run release-matrix.yml`), plus tags,
+# because a cross-platform matrix costs real Actions minutes on every leg and
+# this repo has no release process yet to hang an every-push run off of.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            can_run: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            can_run: true
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            # Cross-compiles fine from an x64 host with the MSVC ARM64
+            # toolset, but the runner's own CPU cannot execute the result.
+            can_run: false
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            # macos-latest runners are Apple Silicon; running an x86_64
+            # binary needs Rosetta, which is not guaranteed present.
+            can_run: false
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            can_run: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      # musl needs a musl-targeting C toolchain on the host for the final
+      # link step, even though nothing in this crate is C. gnu/msvc/darwin
+      # targets link against a libc/CRT the runner image already has.
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # Only where the runner's own architecture can execute the result --
+      # cargo test builds and runs, it does not just compile. The parity
+      # harnesses (parity/*.py) are not run here: they need Python, pandas
+      # and the sibling AstroBinUploader checkout, none of which belongs in a
+      # release build's CI, and the Linux gnu target -- not part of this
+      # matrix, but exercised on every push in CI proper -- already carries
+      # that verification for the logic these targets share.
+      - name: Test
+        if: matrix.can_run
+        run: cargo test --release --target ${{ matrix.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: astrobin-upload-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/astrobin-upload
+            target/${{ matrix.target }}/release/astrobin-upload.exe
+          if-no-files-found: error
+          retention-days: 14
