@@ -20,7 +20,9 @@
 //! 4. `NUMBER` from the `PixInsight:ProcessingHistory` property's nested XML,
 //!    then from a `numberOfImages` comment on a `COMMENT`/`HISTORY` keyword.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
+use std::fs::File;
+use std::io::Read;
 
 use crate::extractor::{HeaderValue, Record};
 use crate::pathutil;
@@ -38,16 +40,23 @@ fn is_unset(hdr: &Record, key: &str) -> bool {
 }
 
 pub fn read_xisf(path: &str) -> Result<Record> {
-    let bytes = std::fs::read(path).with_context(|| format!("reading {path}"))?;
-    if bytes.len() < 16 {
-        bail!("file is too short to hold an XISF header");
-    }
+    // Sixteen bytes, then exactly the declared XML length -- never the image
+    // data behind it. A PixInsight master is 734 MB carrying a 190 KiB header,
+    // and slurping the file would behave identically on the truncated fixtures
+    // while reading four thousand times more than it needs on a real one.
+    let mut file = File::open(path).with_context(|| format!("reading {path}"))?;
+    let mut preamble = [0u8; 16];
+    file.read_exact(&mut preamble)
+        .with_context(|| format!("{path} is too short to hold an XISF header"))?;
     // The Python skips the signature without checking it; a file that is not
     // XISF simply fails to parse as XML a moment later.
-    let length = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize;
-    let end = 16usize.saturating_add(length).min(bytes.len());
-    // `.decode('utf-8', errors='ignore')` — invalid sequences are dropped.
-    let xml = String::from_utf8_lossy(&bytes[16..end]).replace('\u{FFFD}', "");
+    let length =
+        u32::from_le_bytes([preamble[8], preamble[9], preamble[10], preamble[11]]) as u64;
+    let mut buf = Vec::new();
+    // `f.read(length)` returns short at EOF rather than raising.
+    file.take(length).read_to_end(&mut buf).context("reading the XISF XML header")?;
+    // `.decode('utf-8', errors='ignore')` -- invalid sequences are dropped.
+    let xml = String::from_utf8_lossy(&buf).replace('\u{FFFD}', "");
 
     let doc = roxmltree::Document::parse(&xml).context("parsing the XISF XML header")?;
     let root = doc.root_element();

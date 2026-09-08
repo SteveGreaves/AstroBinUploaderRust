@@ -13,7 +13,11 @@ Two comparisons per scenario in `fixtures/binary/`, for the same reason
     The scan happens **in place**, in the committed corpus, and deliberately:
     `SOURCE_PATH` is an absolute path, so copying the scenario somewhere first
     would make every row differ unless both sides were pointed at the identical
-    copy. Nothing is written during a dump.
+    copy. A dump writes nothing -- but only because `--dump-steps` returns
+    before the exporter runs, which is an ordering property of `main`, not of
+    this harness. So the run ends by asking
+    `make_binary_fixtures.py --check` whether anything appeared in the corpus,
+    and fails if it did.
 
 2.  **The artifacts**, from a copy in a scratch directory -- a scan writes
     `AstroBinUploadInfo/` beside the files, which must not land in the corpus.
@@ -167,6 +171,17 @@ def main() -> int:
         print(f"\nkept at {root}")
     else:
         shutil.rmtree(root, ignore_errors=True)
+
+    # The scans above ran inside the committed corpus. Prove they left it
+    # exactly as they found it rather than assuming so.
+    integrity = subprocess.run(
+        [sys.executable, str(HERE / "make_binary_fixtures.py"), "--check"],
+        capture_output=True, text=True,
+    )
+    if integrity.returncode != 0:
+        print("\n[FAIL] the corpus changed during the run:")
+        print(integrity.stdout.strip())
+        failures += 1
 
     if failures:
         print(f"\n{failures}/{len(SCENARIOS)} scenario(s) failed.")

@@ -22,6 +22,8 @@
 //! padding, `HISTORY` and `COMMENT`.
 
 use anyhow::{bail, Context, Result};
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 
 use crate::extractor::{fit_number, HeaderValue, Record};
 use crate::pathutil;
@@ -30,9 +32,14 @@ const BLOCK: usize = 2880;
 const CARD: usize = 80;
 
 /// `_read_fits`: the selected HDU's header, plus `FILENAME` and `NUMBER`.
+///
+/// Reads block by block and **seeks past every data unit**, so a 122 MB frame
+/// costs a couple of 2880-byte reads. Slurping the file would work identically
+/// on the truncated fixtures and move 27 GB over the real `Sadr Region` tree —
+/// the corpus cannot catch that, which is why it is called out here.
 pub fn read_fits(path: &str) -> Result<Record> {
-    let bytes = std::fs::read(path).with_context(|| format!("reading {path}"))?;
-    let hdus = read_headers(&bytes)?;
+    let mut file = File::open(path).with_context(|| format!("reading {path}"))?;
+    let hdus = read_headers(&mut file)?;
     if hdus.is_empty() {
         bail!("no HDU header found");
     }
@@ -52,44 +59,53 @@ pub fn read_fits(path: &str) -> Result<Record> {
 }
 
 /// Every HDU's header, in file order, each already translated if compressed.
-fn read_headers(bytes: &[u8]) -> Result<Vec<Record>> {
+///
+/// Stops at the first header that runs off the end of the file, which is what
+/// a header-only fixture looks like — and what astropy does with one, warning
+/// about the missing data unit and reading on.
+fn read_headers<R: Read + Seek>(file: &mut R) -> Result<Vec<Record>> {
+    let length = file.seek(SeekFrom::End(0))?;
     let mut out = Vec::new();
-    let mut offset = 0usize;
-    while offset + BLOCK <= bytes.len() {
-        let (cards, next) = parse_header(bytes, offset)?;
-        let record = translate_compressed(cards);
-        out.push(record);
+    let mut offset: u64 = 0;
+    while offset + BLOCK as u64 <= length {
+        file.seek(SeekFrom::Start(offset))?;
+        let Some((cards, next)) = parse_header(file, offset)? else {
+            break;
+        };
+        out.push(translate_compressed(cards));
         offset = next;
         let Some(data) = data_unit_size(out.last().expect("just pushed")) else {
             break;
         };
-        offset += data;
-        // A truncated fixture has no data unit at all; that is the end of it.
-        if offset + BLOCK > bytes.len() {
-            break;
-        }
+        // Seeking rather than reading is the whole point: this is where the
+        // 122 MB would otherwise go.
+        offset += data as u64;
     }
     Ok(out)
 }
 
 /// Reads whole 2880-byte blocks of card images until the `END` card.
 ///
-/// Returns the header and the offset of the block after `END`.
-fn parse_header(bytes: &[u8], start: usize) -> Result<(Record, usize)> {
+/// Returns the header and the offset of the block after `END`, or `None` if
+/// the blocks ran out before `END` did.
+fn parse_header<R: Read>(file: &mut R, start: u64) -> Result<Option<(Record, u64)>> {
     let mut record = Record::default();
     let mut offset = start;
+    let mut block = [0u8; BLOCK];
     loop {
-        if offset + BLOCK > bytes.len() {
-            bail!("header runs past the end of the file");
+        if let Err(e) = file.read_exact(&mut block) {
+            if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                return Ok(None);
+            }
+            return Err(e).context("reading a header block");
         }
-        let block = &bytes[offset..offset + BLOCK];
-        offset += BLOCK;
+        offset += BLOCK as u64;
         for i in 0..(BLOCK / CARD) {
             let card = &block[i * CARD..(i + 1) * CARD];
             let text = String::from_utf8_lossy(card);
             let keyword = text[..8.min(text.len())].trim();
             if keyword == "END" {
-                return Ok((record, offset));
+                return Ok(Some((record, offset)));
             }
             if keyword.is_empty() {
                 continue; // blank padding, and the blank commentary keyword

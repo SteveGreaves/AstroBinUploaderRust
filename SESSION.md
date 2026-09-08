@@ -105,6 +105,13 @@ are live in this codebase (hazard 3) and `exporter::tests` pins the distinction.
   in local time — chosen over `libc::localtime_r` because Phase 5's release matrix
   includes Windows, where that function does not exist — and **`roxmltree`** for the
   XISF XML block. The FITS reader is hand-written and depends on nothing.
+- Both readers are **incremental**, and that is not decorative: `fits.rs` seeks past
+  every data unit and `xisf.rs` reads exactly the declared XML length. Slurping the
+  file would behave identically on the truncated fixtures — smallness is precisely what
+  hides it — and move 27 GB over the real `Sadr Region` tree, multiplied by core count
+  once Phase 5 adds `rayon`. Verified on untruncated originals: 856 MB of real files
+  (a 122 MB FITS and a 734 MB PixInsight master) scan in 10 ms at 6.4 MB peak RSS, and
+  still dump identically to Python.
 - `fits.rs` does **not** implement `CONTINUE` long-string cards or `HIERARCH` keywords.
   Measured across all 227 FITS files in the corpus, the only non-value cards are `END`,
   blank padding, `HISTORY` and `COMMENT`. An undefined-value card (`KEY = / comment`)
