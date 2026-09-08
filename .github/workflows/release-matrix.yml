@@ -90,6 +90,7 @@ jobs:
           mkdir "$dir"
           cp "target/${{ matrix.target }}/release/astrobin-upload" "$dir/"
           cp packaging/config.ini.example packaging/README.md LICENSE "$dir/"
+          cp -r packaging/images "$dir/"
           tar -czf "$dir.tar.gz" "$dir"
 
       - name: Stage package (Windows)
@@ -100,7 +101,21 @@ jobs:
           New-Item -ItemType Directory -Path $dir | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/astrobin-upload.exe" $dir
           Copy-Item packaging/config.ini.example, packaging/README.md, LICENSE $dir
-          Compress-Archive -Path $dir -DestinationPath "$dir.zip"
+          Copy-Item -Recurse packaging/images $dir
+          # Compress-Archive's treatment of a bare directory path differs
+          # between PowerShell versions -- some put the folder at the zip root,
+          # some its contents. The .NET call takes it as an explicit argument,
+          # so the archive matches the tarball's shape on every runner.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::CreateFromDirectory(
+            (Resolve-Path $dir).Path,
+            (Join-Path (Get-Location).Path "$dir.zip"),
+            [System.IO.Compression.CompressionLevel]::Optimal,
+            $true)
+          # Prove the shape in the log rather than trusting it.
+          [System.IO.Compression.ZipFile]::OpenRead(
+            (Join-Path (Get-Location).Path "$dir.zip")
+          ).Entries | ForEach-Object { $_.FullName } | Select-Object -First 6
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -128,14 +143,49 @@ jobs:
         with:
           path: packages
 
+      # Written out rather than `--generate-notes`: generated notes are built
+      # from commit messages, which are development history and have no place
+      # on a page users download from.
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           find packages -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print
+          cat > notes.md <<'NOTES'
+          A single self-contained executable that turns a directory of
+          FITS/XISF frames into the acquisition CSV and session summary
+          AstroBin's bulk importer expects. No Python, no libraries, nothing
+          to install.
+
+          Output is byte-for-byte identical to
+          [AstroBinUploader](https://github.com/SteveGreaves/AstroBinUploader)
+          v2.1.2 -- the same CSV, the same summary, the same `--debug` files
+          and the same log.
+
+          ### Which file do I want?
+
+          | Archive | For |
+          |---|---|
+          | `x86_64-unknown-linux-musl` | Linux, Intel/AMD (static -- any distribution) |
+          | `x86_64-pc-windows-msvc` | Windows, Intel/AMD |
+          | `aarch64-pc-windows-msvc` | Windows on ARM |
+          | `x86_64-apple-darwin` | macOS, Intel |
+          | `aarch64-apple-darwin` | macOS, Apple Silicon |
+
+          ### Getting started
+
+          Extract the archive, copy `config.ini.example` to `config.ini` and
+          edit it for your site and filters, then:
+
+          ```
+          astrobin-upload "/path/to/my/images/Sadr Region"
+          ```
+
+          `README.md` in the archive is the full manual.
+          NOTES
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
+            --notes-file notes.md \
             $(find packages -type f \( -name '*.tar.gz' -o -name '*.zip' \) | sort)
