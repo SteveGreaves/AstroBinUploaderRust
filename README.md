@@ -9,19 +9,27 @@ expects.
 The goal is a single self-contained binary per platform — Windows, Linux and
 macOS — with no Python, no libcfitsio and no shared-library requirements.
 
-## Status: Phase 1 of 6
+## Status: Phase 3 of 6
 
-This does not process images yet. See [`PORT_PLAN.md`](PORT_PLAN.md) for the
-full plan, the parity contract and the ranked hazard list.
+The pipeline is complete and byte-exact end to end — but only from a captured
+CSV. Reading FITS and XISF files off disk is Phase 4, so a run still needs
+`--test <csv>`. See [`PORT_PLAN.md`](PORT_PLAN.md) for the full plan, the
+parity contract and the ranked hazard list.
 
 | Phase | Scope | State |
 |---|---|---|
 | 1 | CLI, config parser, `--test` CSV ingest | **done** |
-| 2 | The six pipeline steps | not started |
-| 3 | Exporter and report formatting | not started |
+| 2 | The six pipeline steps | **done** |
+| 3 | Exporter and report formatting | **done** |
 | 4 | FITS and XISF readers | not started |
 | 5 | Parallelism, release matrix | not started |
 | 6 | Differential harness in CI | not started |
+
+```sh
+$ astrobin-upload "/data/Sadr Region" --test raw.csv --config config.ini
+# writes Sadr_Region_acquisition.csv and Sadr_Region_session_summary.txt
+# into /data/Sadr Region/AstroBinUploadInfo/
+```
 
 ## The parity contract
 
@@ -62,11 +70,32 @@ $ cargo build && python3 parity/check_parity.py
 It needs `configobj` and `pandas` installed, since those are what it compares
 against.
 
+Two more harnesses sit on top of it, and all three must stay green:
+
+```
+$ python3 parity/check_steps.py      # every pipeline step, cell by cell
+[PASS] sadr: 465 lines identical  (00_raw, 01_NormalizeHeadersStep, ...)
+[PASS] sh2101_calib: 450 lines identical  (00_raw, 01_NormalizeHeadersStep, ...)
+
+$ python3 parity/check_reports.py    # the two output artifacts
+[PASS] sadr: both artifacts byte-identical; temperature statistics bit-identical over 1 site(s)
+[PASS] sh2101_calib: both artifacts byte-identical; temperature statistics bit-identical over 1 site(s)
+```
+
+`check_steps.py` compares the live Python pipeline's frames against this
+binary's, in a canonical form that survives the trip (floats as raw IEEE-754
+bits, so no repr disagreement can hide a difference). `check_reports.py`
+byte-compares the finished CSV and summary against the committed references,
+and then compares the temperature statistics the summary *rounds away* — a
+green summary says nothing about how a mean was summed, and one of them is
+numpy's pairwise reduction rather than the Kahan sum the rest of the pipeline
+uses.
+
 ## Build
 
 ```sh
 cargo build --release      # target/release/astrobin-upload
-cargo test                 # 19 unit tests
+cargo test                 # 103 unit tests
 ```
 
 ## Corpus

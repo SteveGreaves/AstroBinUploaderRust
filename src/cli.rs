@@ -53,6 +53,14 @@ pub struct Cli {
     /// aid, not part of the Python CLI surface.
     #[arg(long, hide = true)]
     pub dump_steps: bool,
+
+    /// Print the summary's temperature statistics at full precision and exit.
+    /// The report rounds them to one decimal, which hides every summation-
+    /// order difference; `parity/check_reports.py` compares these bits
+    /// against pandas instead. Requires `--test`. Hidden, like the dumps
+    /// above.
+    #[arg(long, hide = true)]
+    pub dump_report_stats: bool,
 }
 
 #[cfg(test)]

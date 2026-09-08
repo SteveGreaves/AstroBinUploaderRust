@@ -229,27 +229,32 @@ matched before their coordinates are snapped).
 ### 1. `acq_df.to_string()` appended to the summary — highest risk
 `engine/exporter.py:122`
 
-The bottom of every session summary is a pandas text render of the acquisition
-table. The formatting rules are non-obvious. Confirmed empirically:
+**Resolved in Phase 3** — `src/pandas_fmt.rs`, and it landed cheaper than
+budgeted because the mechanism turned out to be simpler than the symptom.
 
-**Floats get a per-column common decimal count**, chosen as the minimum that
-round-trips every value in that column:
+The bottom of every session summary is a pandas text render of the acquisition
+table. The rules, measured against pandas 2.2.3 rather than read off the docs:
+
+**Floats get a per-column common decimal count.** The description above —
+"the minimum that round-trips every value" — describes the *effect*, not the
+algorithm. `FloatArrayFormatter` renders every value `%.6f`
+(`display.precision`), then `_trim_zeros_float` strips one trailing character
+from *every* decimal-looking entry for as long as they all still end in `0`,
+and finally restores a single `0` after a bare decimal point (which is what
+turns `600.000000` into `600.` into `600.0`):
 
 ```
       v
   4.600
   4.750
-100.125     ← the 3-decimal value forces 4.6 to render as "4.600"
+100.125     ← the 3-decimal value stops the trim for the whole column
 ```
 
-So a single value elsewhere in the column changes how *this* value prints. The
-Rust implementation must compute the column-wide decimal count first, then
-format — not format each value independently.
+**Column width** is `max(len(header), max(len(formatted_value)))`, everything
+right-justified, columns adjoined by a **single** space.
 
-**Column width** is `max(len(header), max(len(formatted_value)))`, values
-right-aligned including string columns.
-
-**The separator is not uniform.** Measured on a mixed frame:
+**The separator looks non-uniform, and the reason is the header, not the
+values:**
 
 ```
 '  a  bbbbbb    s'
@@ -257,13 +262,24 @@ right-aligned including string columns.
 '222    2.25 yyyy'
 ```
 
-Two spaces between the numeric columns, one before the string column — because
-pandas' numeric array formatter injects a leading space into each value that the
-object formatter does not. Reproducing this requires matching pandas' per-dtype
-formatter behaviour, not just a column-width calculation.
+The first draft attributed the extra space to "pandas' numeric array formatter
+injects a leading space into each value". That is what happens with an index;
+with `index=False` pandas passes `leading_space=False` all the way down and no
+value gets a prefix. The space comes from
+`DataFrameFormatter._get_formatted_column_labels`:
 
-None of this is intractable. All of it is fiddly, and it is the part most likely
-to produce a one-byte diff that costs a day to find.
+```python
+[" " + x if not self._get_formatter(i) and need_leadsp[x] else x]
+```
+
+`need_leadsp` is `is_numeric_dtype` per column, so a **numeric column's header
+is one character wider than its name**. A numeric column whose values are
+narrower than its name therefore gains a leading blank; an object column never
+does. That single rule reproduces the sadr and sh2101 tables exactly.
+
+The scientific-notation fallback (`has_small_values`, or `too_long and
+has_large_values`) is transcribed too, though no fixture reaches it — the
+acquisition frame's floats are all pre-rounded to two decimals.
 
 ### 2. Group-key ordering *is* row ordering
 
@@ -374,15 +390,32 @@ non-negative durations here the behaviours coincide, but pin it with tests.
 
 `steps::kahan_mean` implements the first. It is live, not theoretical: the
 `sadr` fixture's GPS cluster centroids average several drifting readings, and
-the aggregation step means nine columns. **If a bare `Series.mean()` ever
-appears in the Python, it needs a pairwise implementation instead** — the two
-are not interchangeable.
+the aggregation step means nine columns.
 
-pandas delegates `mean`/`sum` to numpy, which uses pairwise summation; a naive
-left fold in Rust can differ in the last ULP. After `{:.2}` this is invisible
-except when a value sits exactly on a `.005` boundary. Mitigate by summing in
-the same order and routing through `python_round`; accept the residual risk and
-let the differential harness catch it.
+**The warned-about bare `Series.mean()` did appear**, in Phase 3:
+`reports.py::get_observation_period`'s "Mean temperature" line is the only one
+in the codebase. It goes through `nanops.nanmean` — NA filled with zero, the
+*whole* array summed by numpy's pairwise reduction, divided by the non-NA
+count — so `steps::pairwise_sum` transcribes numpy's `pairwise_sum_@TYPE@`
+(plain loop below 8, 8-accumulator unrolled block with a fixed reduction tree
+to `PW_BLOCKSIZE = 128`, recursive halves rounded down to a multiple of 8
+above it). Note that dropping the missing rows before summing would change the
+tree shape and with it the answer, so they are kept as zeros.
+
+This one is *measurable on the corpus*, which most last-bit hazards are not.
+The summary prints the mean to one decimal place, so the artifact diff cannot
+see it; `parity/check_reports.py` compares the raw bits instead. Over the two
+fixtures:
+
+| | n | pandas | left fold | Kahan |
+|---|---|---|---|---|
+| `sadr` | 15 | `…402b40` (`0x27`) | `…402b40` (`0x27`) | `…402b40` (`0x29`) |
+| `sh2101_calib` | 28 | `…802d40` (`0xfa`) | `…802d40` (`0xf9`) | `…802d40` (`0xfa`) |
+
+Neither alternative matches both fixtures. Pairwise matches both, and
+`steps::tests::pairwise_sum_matches_numpy_across_all_three_branches` pins all
+three branches against numpy directly so `cargo test` alone catches a
+regression.
 
 ### 5. pandas string-op null semantics
 
@@ -396,6 +429,19 @@ is usually the right shape for the `na=False` cases.
 Both appear in this codebase, sometimes within a few lines of each other
 (`aggregate.py` uses `'first'`; `reports.py` uses `.iloc[0]`). They are different
 functions. Port each faithfully to its own call site.
+
+**Phase 3 detail:** `reports.py`'s `.iloc[0]` reads two *different* frames
+inside one site section. Latitude, longitude, bortle and SQM come from
+`site_group` — calibration rows included — while the equipment names come from
+the LIGHT subset. `src/reports.rs` keeps them as separate row-index slices for
+that reason.
+
+Also live in Phase 3: every `groupby` in `reports.py` runs with the default
+`dropna=True` and, unlike `AggregationStep`, does **no** key fill first. A null
+`filter`, `gain_match` or `exposure` silently removes that row from its table
+(hazard 2). `gain_match` reaches the report through `agg('first')`, which
+returns null when every source row was null, so this is reachable rather than
+theoretical.
 
 ### 7. `pd.to_datetime(errors='coerce')`
 
@@ -605,7 +651,7 @@ covers.
 | **0** | Freeze the contract — **done**: `v2.1.1` tagged and on `main`, goldens regenerated. | Nothing testable without it |
 | **1** | ~~Cargo scaffold, `clap` CLI, config parser, `--test` CSV ingest with pandas-equivalent dtype inference~~ — **done**, verified against configobj and pandas by `golden_tests/check_rust_parity.py` | Reaches end-to-end on committed fixtures without writing a single byte of FITS parsing |
 | **2** | ~~The six pipeline steps as pure functions over `Table`, incl. `NormalizeHeadersStep` Stage 3b (equipment value overrides, v2.1.1)~~ — **done**. All six are byte-identical to the Python oracle on both fixtures (`parity/check_steps.py`: 465 / 450 lines, every column, every cell, column *and* row order) | The bulk of the logic; fully exercised by Phase 1's CSV path |
-| **3** | Exporter + `reports.py` — the byte-parity grind | Hazard 1 lives here |
+| **3** | ~~Exporter + `reports.py` — the byte-parity grind~~ — **done**. Both artifacts are byte-identical to the committed references on both fixtures, and the statistics the summary rounds away are bit-identical (`parity/check_reports.py`) | Hazard 1 lived here |
 | **4** | FITS and XISF readers | The only part the CSV fixtures cannot exercise. **Prerequisite:** `REMEDIATION_PLAN.md` P0 item 3 — hand-built FITS/XISF fixtures under `golden_tests/fixtures/binary/` — was never done and that directory does not exist. Build it as the first task of this phase, including a tile-compressed `.fits.fz` case. |
 | **5** | `rayon` parallelism; release matrix for Windows / Linux (`musl` static) / macOS, x86-64 and arm64 | Optimise only once correct |
 | **6** | Differential harness in CI: both binaries over the full corpus, byte-compare modulo the `Generated` line | Ongoing guarantee |
@@ -640,16 +686,28 @@ is unchanged and it is still the single largest block.
 Phase 3 is 15% of the lines and 40% of the effort. That asymmetry is the single
 most important thing to plan around, and it is almost entirely hazard 1.
 
+**Outturn:** ~1,100 lines including tests (`pandas_fmt.rs`, `exporter.rs`,
+`reports.rs`, `check_reports.py`), and both artifacts matched on the first
+run. The estimate was right about where the risk was and wrong about its size:
+hazard 1 collapsed once the leading space was traced to the *header* rather
+than the values, and every remaining difficulty was in `reports.py`'s
+reductions, not its formatting.
+
 ---
 
 ## Decisions (settled 2026-09-07)
 
 1. **`to_string()` fidelity: (a) byte-faithful.** The requirement is "exactly
    as this code does", so Phase 3 reimplements the closed subset of pandas'
-   formatter this program actually exercises (all-numeric plus one or two
-   string columns, no nulls, no truncation) and property-tests it against real
-   pandas output over generated frames. ~150 lines + test harness; the bulk of
-   Phase 3.
+   formatter this program actually exercises. **Landed** as
+   `src/pandas_fmt.rs` (~230 lines with tests). It went further than the
+   "no nulls, no truncation" subset this decision scoped: the NA rendering,
+   the empty-frame short circuit and the scientific-notation fallback are all
+   transcribed, because each is a handful of lines and a user's data can reach
+   them even though the corpus cannot. The planned property-test harness was
+   not built — the unit tests pin the cases measured against pandas 2.2.3
+   directly, and `parity/check_reports.py` compares the real rendered table
+   byte for byte.
 2. **Target platforms: Windows, Linux, and macOS — all three.** Build matrix:
    `x86_64-unknown-linux-musl` (static), `x86_64-pc-windows-msvc` and
    `aarch64-pc-windows-msvc`, `x86_64-apple-darwin` and `aarch64-apple-darwin`.

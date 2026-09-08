@@ -1,11 +1,11 @@
-//! Rust port of AstroBinUpload.py — Phase 1.
+//! Rust port of AstroBinUpload.py — Phases 1–3.
 //!
-//! Parity target: Python `v2.1.1` (see RUST_PORT_PLAN.md). This phase covers
-//! the CLI, the configobj-compatible config parser, and the `--test` CSV
-//! ingest path with pandas-equivalent dtype inference. The six pipeline steps
-//! (Phase 2), the report/exporter formatting (Phase 3) and the FITS/XISF
-//! readers (Phase 4) are not implemented yet; the binary reports what it
-//! loaded and exits rather than pretending otherwise.
+//! Parity target: Python `v2.1.1` (see PORT_PLAN.md). Landed: the CLI, the
+//! configobj-compatible config parser, the `--test` CSV ingest path with
+//! pandas-equivalent dtype inference, the six pipeline steps, and the
+//! exporter plus reports. Still missing: the FITS/XISF readers (Phase 4), so
+//! a run without `--test` has nothing to scan and says so rather than
+//! pretending otherwise.
 
 mod appconfig;
 mod cli;
@@ -13,7 +13,10 @@ mod config;
 mod datetime;
 mod constants;
 mod dump;
+mod exporter;
 mod numeric;
+mod pandas_fmt;
+mod reports;
 mod steps;
 mod table;
 
@@ -65,42 +68,95 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    println!("astrobin-upload {} (Phase 1)", env!("CARGO_PKG_VERSION"));
-    println!("config: {}", args.config.display());
-    for name in ["defaults", "override", "equipmentoverrides", "filters", "sites"] {
-        if let Some(sec) = cfg.section(name) {
-            println!(
-                "  [{name}] {} value(s), {} subsection(s)",
-                sec.values.len(),
-                sec.sections.len()
-            );
-        }
+    if args.dump_report_stats {
+        let Some(csv) = args.test.as_deref() else {
+            bail!("--dump-report-stats needs --test <csv>: disk scanning is Phase 4");
+        };
+        dump_report_stats(&cfg, csv)?;
+        return Ok(());
     }
 
-    match &args.test {
-        Some(csv) => {
-            let t = Table::read_csv_upper(csv)
-                .with_context(|| format!("ingesting {}", csv.display()))?;
-            println!(
-                "--test ingest: {} rows x {} columns from {}",
-                t.n_rows,
-                t.columns.len(),
-                csv.display()
-            );
-            // Print the columns whose dtype is load-bearing for output
-            // formatting, so a parity mismatch is visible immediately.
-            for name in ["GAIN", "XBINNING", "NUMBER", "EGAIN", "EXPOSURE", "IMAGETYP"] {
-                if let Some(c) = t.column(name) {
-                    println!("    {name:<9} {:?}", c.dtype);
-                }
-            }
-        }
-        None => {
-            println!("disk scanning is Phase 4; re-run with --test <csv> for now");
-        }
-    }
+    let Some(csv) = args.test.as_deref() else {
+        bail!("disk scanning is Phase 4; re-run with --test <csv> for now");
+    };
 
-    bail!("Phase 1 only: the pipeline, reports and file readers are not implemented yet")
+    // The output directory lives inside the *resolved* first argument, but
+    // the basename the artifacts are named after comes from the raw argument
+    // string, before any resolution -- `os.path.basename(args.directory_paths[0])`,
+    // not of the abspath'd copy.
+    let first = &args.directory_paths[0];
+    let out_dir = std::fs::canonicalize(first)
+        .with_context(|| format!("resolving {}", first.display()))?
+        .join("AstroBinUploadInfo");
+    std::fs::create_dir_all(&out_dir)
+        .with_context(|| format!("creating {}", out_dir.display()))?;
+
+    let basename = py_basename(&first.to_string_lossy()).replace(' ', "_");
+
+    println!("Output directory: {}", out_dir.display());
+
+    let raw = Table::read_csv_upper(csv)
+        .with_context(|| format!("ingesting {}", csv.display()))?;
+    let app = crate::appconfig::AppConfig::from_config(&cfg)?;
+    let agg = run_pipeline(&raw, &app)?;
+
+    let now = local_timestamp();
+    if let Some(summary) = exporter::export(&agg, raw.n_rows, &basename, &out_dir, &now)? {
+        // `print(summary)` on the Python side.
+        println!("{summary}");
+    }
+    println!("\nProcessing complete.");
+    Ok(())
+}
+
+/// The six steps, in the order `PipelineProcessor` runs them.
+fn run_pipeline(raw: &Table, app: &crate::appconfig::AppConfig) -> Result<Table> {
+    let df = steps::normalize::execute(raw, app)?;
+    let df = steps::optical::execute(&df, app)?;
+    let df = steps::deduplicate::execute(&df)?;
+    let df = steps::calibration::execute(&df)?;
+    let df = steps::geocode::execute(&df, app)?;
+    steps::aggregate::execute(&df, app)
+}
+
+/// `os.path.basename` on POSIX: everything after the last `/`, and nothing
+/// else. `Path::file_name` is not a substitute -- it answers `Some("b")` for
+/// `/a/b/` where Python answers `""`, and `None` for `.` where Python answers
+/// `"."`. The result names every output file, so the two must agree.
+fn py_basename(p: &str) -> &str {
+    match p.rfind('/') {
+        Some(i) => &p[i + 1..],
+        None => p,
+    }
+}
+
+/// The summary's temperature statistics, one line per site, as raw IEEE-754
+/// bits — the same little-endian hex `dump.rs` uses for float cells.
+fn dump_report_stats(cfg: &ConfigFile, csv: &std::path::Path) -> Result<()> {
+    let raw = Table::read_csv_upper(csv)
+        .with_context(|| format!("ingesting {}", csv.display()))?;
+    let app = crate::appconfig::AppConfig::from_config(cfg)?;
+    let agg = run_pipeline(&raw, &app)?;
+    for (site, st) in reports::report_temp_stats(&agg) {
+        println!(
+            "SITE\t{site}\t{}\t{}\t{}\t{}",
+            st.count,
+            dump::canon(&crate::table::Cell::Float(st.min)),
+            dump::canon(&crate::table::Cell::Float(st.max)),
+            dump::canon(&crate::table::Cell::Float(st.mean)),
+        );
+    }
+    Ok(())
+}
+
+/// `datetime.now().strftime("%Y-%m-%d %H:%M:%S")` in the local timezone.
+///
+/// The one line of output that legitimately differs between runs, and the one
+/// the golden harness normalises away. Implemented against `libc::localtime`
+/// through `chrono` rather than by hand: a UTC-only clock would produce a
+/// summary that reads wrong to the user in every timezone but one.
+fn local_timestamp() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 /// Canonical, line-oriented dump of everything Phase 1 parses.

@@ -373,7 +373,7 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
 
 /// Element-wise comparison of two group keys, each column by its own type —
 /// what `groupby(sort=True)` does across a mixed-dtype key.
-fn compare_keys(a: &[Cell], b: &[Cell]) -> std::cmp::Ordering {
+pub fn compare_keys(a: &[Cell], b: &[Cell]) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     for (x, y) in a.iter().zip(b) {
         let ord = match (x, y) {
