@@ -125,7 +125,7 @@ fn load_headers(args: &Cli, announce: bool) -> Result<Table> {
                 .iter()
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect();
-            extractor::extract_from_directories(&paths)
+            extractor::extract_from_directories(&paths, announce)
         }
     }
 }

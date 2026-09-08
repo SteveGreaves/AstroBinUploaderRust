@@ -127,24 +127,78 @@ impl Record {
 /// Phase 4's own test runs, shows no measurable difference at all), which is
 /// why this is not "faster on every machine" so much as "never slower, and
 /// sometimes much faster."
-pub fn extract_from_directories(paths: &[String]) -> Result<Table> {
+///
+/// `progress`: prints "Scanning files: N of total..." to stdout as files
+/// complete, matching the current Python's one remaining progress line (see
+/// below) -- but only when `true`. The `--dump-steps`/`--dump-report-stats`
+/// diagnostic paths pass `false`: their stdout *is* the canonical dump, byte
+/// for byte, and progress text interleaved into it would corrupt every line
+/// after the first. The oracle script (`parity/dump_steps.py`) keeps its own
+/// stdout equally clean by redirecting Python's `extract_from_directories`
+/// output to stderr for the same call -- this is the Rust side of that same
+/// requirement, not an independent choice.
+pub fn extract_from_directories(paths: &[String], progress: bool) -> Result<Table> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     let files = scan_directories(paths)?;
+    let total = files.len();
+
+    // "Scanning files: N of total..." -- the one progress line the current
+    // Python still prints (extractor.py, inside its ProcessPoolExecutor
+    // loop; the per-row "Processing optical metrics"/"Processing LIGHT
+    // frame" counters a much older install may show belong to a
+    // pre-vectorisation OpticalParameterStep and are gone by the version
+    // this port targets). Python's counter advances in *completion* order
+    // under `as_completed()`, not dispatch order -- since it is only ever
+    // compared to `total` and never to a specific filename, a counter
+    // advanced once per finished closure here is the same observable
+    // sequence, whichever thread happens to finish which file.
+    //
+    // One honest difference: Python's counter is strictly monotonic because
+    // its *consumption* of completions is single-threaded even though the
+    // *work* is parallel (`for i, future in enumerate(as_completed(...))`
+    // runs on the main thread alone). Here the print happens inside the
+    // worker closure itself, so two threads finishing close together can
+    // print their `fetch_add` results in either order -- an occasional
+    // transient "51 of N" followed by "50 of N" before the line is
+    // overwritten again. Cosmetic only (each `print!` call is atomic with
+    // respect to the others, so lines never interleave mid-write) and
+    // self-corrects within milliseconds; not worth a synchronised hand-off
+    // to fix.
+    let done = AtomicUsize::new(0);
     let results: Vec<Option<Record>> = files
         .par_iter()
-        .map(|p| match extract_single_file(p) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                // "Silent failure for individual files to prevent pipeline
-                // crashing" -- the Python logs and drops the row. Printing
-                // directly from a worker thread is safe (each `eprintln!`
-                // call takes the stream lock for its one write) but the
-                // interleaving of multiple files' warnings is unspecified,
-                // unlike the Python's single-process log.
-                eprintln!("warning: error parsing headers for {p}: {e}");
-                None
+        .map(|p| {
+            let result = match extract_single_file(p) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    // "Silent failure for individual files to prevent
+                    // pipeline crashing" -- the Python logs and drops the
+                    // row. Printing directly from a worker thread is safe
+                    // (each `eprintln!` call takes the stream lock for its
+                    // one write) but the interleaving of multiple files'
+                    // warnings is unspecified, unlike the Python's
+                    // single-process log.
+                    eprintln!("warning: error parsing headers for {p}: {e}");
+                    None
+                }
+            };
+            if progress {
+                let i = done.fetch_add(1, Ordering::Relaxed) + 1;
+                print!("\rScanning files: {i} of {total}...");
+                let _ = std::io::stdout().flush();
             }
+            result
         })
         .collect();
+    if progress {
+        // `print("\n")` on the Python side -- the string "\n" plus print's
+        // own trailing newline, i.e. a blank line after the progress bar,
+        // not just one newline ending it.
+        println!("\n");
+    }
+
     let records: Vec<Record> = results.into_iter().flatten().collect();
     Ok(Table::from_records(&records))
 }
