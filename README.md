@@ -11,12 +11,14 @@ macOS — with no Python, no libcfitsio and no shared-library requirements. The
 FITS header reader is hand-written for exactly that reason; the whole binary
 depends on `clap`, `anyhow`, `chrono` and `roxmltree`.
 
-## Status: Phase 5 of 6
+## Status: complete (6 of 6)
 
 Functionally complete and released for five platforms: a directory of
 FITS/XISF frames in, both artifacts out, byte-identical to Python v2.1.2, with
-`rayon` parallelism on the disk scan and a CI-verified build for Linux
-(`musl`, static), Windows (x86-64 and arm64) and macOS (x86-64 and arm64).
+`rayon` parallelism on the disk scan, a CI-verified build for Linux (`musl`,
+static), Windows (x86-64 and arm64) and macOS (x86-64 and arm64), and a
+differential harness confirming parity against the live Python oracle on
+every push.
 
 | Phase | Scope | State |
 |---|---|---|
@@ -25,7 +27,7 @@ FITS/XISF frames in, both artifacts out, byte-identical to Python v2.1.2, with
 | 3 | Exporter and report formatting | **done** |
 | 4 | FITS and XISF readers | **done** |
 | 5 | Parallelism, release matrix | **done** |
-| 6 | Differential harness in CI | not started |
+| 6 | Differential harness in CI | **done** |
 
 ```sh
 $ astrobin-upload "/data/Sadr Region"
@@ -116,6 +118,15 @@ targets: `x86_64-unknown-linux-musl` (fully static), `x86_64-pc-windows-msvc`,
 `aarch64-pc-windows-msvc`, `x86_64-apple-darwin`, `aarch64-apple-darwin`. No
 target needs a C toolchain of its own beyond musl's final link step — the
 whole point of hand-writing the FITS reader instead of binding cfitsio.
+
+## Continuous parity checking
+
+`.github/workflows/differential-harness.yml` runs all four `parity/check_*.py`
+scripts on every push to `main` — the live Python oracle and this port, side
+by side, on GitHub's own runners. Report-only: a divergence shows as a failed
+step, not a failed build, since this repo has no PR workflow yet for a
+blocking check to gate. Meant to retire once there has been a release to
+overlap with (`PORT_PLAN.md` decision 4), not stay forever.
 
 `check_steps.py` compares the live Python pipeline's frames against this
 binary's, in a canonical form that survives the trip (floats as raw IEEE-754

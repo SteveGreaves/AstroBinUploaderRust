@@ -5,7 +5,8 @@ CSVs) to a self-contained Rust binary, reproducing the Python output **byte for 
 
 This repository is the port. It was split out of the Python project on 2026-09-07 at
 the user's request — the two are now fully independent. The Python side is **complete
-and released at v2.1.1**; no further Python work is expected.
+and released at v2.1.2**; no further Python work is expected unless another real-data
+surprise turns one up, as v2.1.2 itself did.
 
 Plan of record: **`PORT_PLAN.md`** — parity contract, dependency mapping, six phases,
 and fourteen ranked parity hazards. Read it before writing code.
@@ -16,6 +17,18 @@ and fourteen ranked parity hazards. Read it before writing code.
 - Python venv for the parity scripts: `/mnt/raid0/Code/venvs/.astrovenv/bin/python3`
 
 ## ✅ Completed Work
+
+**Phase 6 — complete, 2026-09-08.** `.github/workflows/differential-harness.yml`: all four
+`check_*.py` scripts run on every push to `main`, checking out the public Python oracle
+as a sibling directory (no maintainer-machine paths) and byte-comparing it against this
+port on GitHub's own runners. Report-only (`continue-on-error` per step) per
+`PORT_PLAN.md` decision 4 — this repo has no PR workflow to gate yet, and the harness is
+meant to retire after one release of overlap, not become permanent infrastructure.
+**Run for real, not just authored and trusted**: pushed, watched with `gh run watch`,
+confirmed every one of the sixteen individual fixture/scenario checks actually passed
+(not just green step icons) — `check_parity.py` 5/5, `check_steps.py` 4/4,
+`check_reports.py` 4/4, `check_readers.py` 3/3, 1m30s total. Every phase in
+`PORT_PLAN.md`'s plan of record is now done.
 
 **Post-Phase-5 fix, 2026-09-08 — parity target bumped to v2.1.2.** Running the port against
 the user's real, unstructured PixInsight/calibration directories (not the corpus) surfaced a
@@ -228,18 +241,26 @@ are live in this codebase (hazard 3) and `exporter::tests` pins the distinction.
 
 ## 🚀 Next Steps
 
-**Phase 6: the differential harness in CI.** Everything else in `PORT_PLAN.md`'s six
-phases is done — the pipeline is byte-identical to Python v2.1.1 end to end, and the
-binary builds and passes its own tests on all five release targets.
+**All six phases of `PORT_PLAN.md` are complete.** The port is functionally done and
+verified: byte-identical to Python v2.1.2 end to end, building and passing its own tests
+on five release targets, with a live differential harness confirming it on every push.
+There is no mandated next phase — what follows is maintenance-shaped work, not a plan
+item:
 
-What Phase 6 actually needs, distinct from the release matrix Phase 5 just built:
-running `check_parity.py` / `check_steps.py` / `check_reports.py` / `check_readers.py`
-themselves in CI — which means a runner with the sibling `AstroBinUploader` checkout,
-Python, pandas and configobj, not just `cargo test`. That is a different, heavier CI job
-than `release-matrix.yml`, and per `PORT_PLAN.md` decision 4 it is meant to run "during
-development and for one release of overlap, then retire" — not become permanent
-infrastructure. Decide the trigger (every push? PRs only?) and whether it blocks merges
-before building it; both change the shape of the workflow.
+- **Retire the differential harness eventually**, per decision 4 — it was scoped to run
+  "during development and for one release of overlap, then retire," not stay forever.
+  Not yet: there has been no release to overlap with.
+- **Fixture gaps still on record** (see Blockers above): `DARKFLAT`/`MASTERDARKFLATS`,
+  a multi-site session, a blank filter in a flat table. Each needs a matching real
+  dataset before it can be closed the way this session closed everything else — by
+  measuring, not guessing.
+- **Windows/macOS binaries are built and tested in CI but never run by a human** on
+  either platform. The first real use on Windows is also the first real test of
+  `pathutil::windows` outside its unit tests and of `SITELAT`/`SITELONG` fallback paths
+  the corpus doesn't reach.
+- **A real release** — tagging a version, publishing the five binaries somewhere a user
+  would actually get them from — has not happened. Everything so far has been `cargo
+  build` and CI artifacts.
 
 The method that carried Phases 2 to 4 transfers again:
 
@@ -261,10 +282,13 @@ The method that carried Phases 2 to 4 transfers again:
 
 ## 📂 Files to Load
 
-- `PORT_PLAN.md` — plan of record. Phase 6 is the differential harness in CI.
+- `PORT_PLAN.md` — plan of record. All six phases done; read the "Not yet covered by
+  any fixture" gaps in `parity/CORPUS.md` before assuming there's nothing left.
 - The four harnesses — run all of them first to confirm the starting state is green:
-  `check_parity.py`, `check_steps.py`, `check_reports.py`, `check_readers.py`.
-- `.github/workflows/release-matrix.yml` — the pattern a Phase 6 workflow should follow:
-  matrix jobs, real verification via `gh run watch`, not just written and trusted.
-- `PORT_PLAN.md`'s decision 4, on how much CI infrastructure this differential harness
-  is meant to become before it retires.
+  `check_parity.py`, `check_steps.py`, `check_reports.py`, `check_readers.py`. They also
+  now run automatically on every push (`.github/workflows/differential-harness.yml`).
+- `.github/workflows/release-matrix.yml` and `differential-harness.yml` — the pattern any
+  future workflow here should follow: real verification via `gh run watch`, not just
+  written and trusted.
+- `PORT_PLAN.md`'s decision 4, on how much CI infrastructure the differential harness is
+  meant to become before it retires.
