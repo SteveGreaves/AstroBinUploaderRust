@@ -199,6 +199,35 @@ mod tests {
         assert_eq!(wbpp_base("notes.txt"), None);
     }
 
+    /// Upstream issue #11 (github.com/SteveGreaves/AstroBinUploader),
+    /// filed against v1.4.5 against the exact pre-A1 pattern this module's
+    /// doc comment already describes: a target name beginning with `C`
+    /// collapsed a 486-file, 9-session dataset into 2 rows, because `_C` in
+    /// `_CandidateDolphin` matched the unanchored `_c.*` postfix. Already
+    /// fixed by A1 (this is the same class of bug the test above pins with
+    /// `M31_calibrated_001.fits`) -- checked against the reporter's own
+    /// filenames specifically, rather than assumed covered by a similar
+    /// case, and confirmed end to end: the same 482-row dataset the report
+    /// describes now produces 9 sessions in both live Python v2.1.2 and
+    /// this port, byte-identically.
+    #[test]
+    fn github_issue_11_candidate_dolphin_does_not_collapse() {
+        let light = "LIGHT_CandidateDolphin_600.00s_Bin_1x1_O_2025-11-23_18-17-06_-10.00c_Rot_37.41_deg_0000.fits";
+        let flat = "FLAT_CandidateDolphin_2.00s_Bin_1x1_O_2025-11-23_20-16-42_-10.60c_Rot_37.37_deg_0000.fits";
+        assert_eq!(
+            wbpp_base(light).as_deref(),
+            Some("LIGHT_CandidateDolphin_600.00s_Bin_1x1_O_2025-11-23_18-17-06_-10.00c_Rot_37.41_deg_0000")
+        );
+        assert_eq!(
+            wbpp_base(flat).as_deref(),
+            Some("FLAT_CandidateDolphin_2.00s_Bin_1x1_O_2025-11-23_20-16-42_-10.60c_Rot_37.37_deg_0000")
+        );
+        // Distinct frame numbers must not collapse onto the shared "LIGHT"
+        // the pre-A1 pattern produced for every light frame in the report.
+        let light2 = light.replace("0000", "0001");
+        assert_ne!(wbpp_base(light), wbpp_base(&light2));
+    }
+
     #[test]
     fn matching_is_case_insensitive_but_the_base_keeps_its_case() {
         assert_eq!(wbpp_base("M31_Light_001_C.FITS").as_deref(), Some("M31_Light_001"));
