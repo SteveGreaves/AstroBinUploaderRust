@@ -25,6 +25,50 @@ rules *measured* against pandas 2.2.3). `parity/check_parity.py`: 3/3.
 Python oracle on both fixtures: 465 lines (sadr) and 450 lines (sh2101_calib), every
 column, every cell, column order and row order included. `python3 parity/check_steps.py`.
 
+**Phase 5 — complete, 2026-09-08.** `rayon` parallelism and the five-target release matrix,
+both verified rather than assumed.
+
+- `extract_from_directories` now reads files in parallel. Row order (hazard 8) comes from
+  `par_iter().map().collect()` into an indexed `Vec`, which preserves input order by
+  construction — no reassembly step exists to get wrong, unlike the Python's
+  `ProcessPoolExecutor` + explicit re-sort. Measured on this project's own rotational
+  disk (an `ST8000DM004`; the astro datasets are not on SSD), same code path both times
+  via `RAYON_NUM_THREADS=1`: **15.0 ms/file serial vs 6.6 ms/file parallel — 2.3x**. The
+  win is hiding seek latency, not CPU time. Correctness unaffected: `check_readers.py`
+  still cell-identical, and three repeated parallel scans of the 221-file `Sadr Region`
+  tree hash identically.
+- `src/pathutil.rs` is restructured into `posix` and `windows` submodules — mirroring how
+  CPython itself keeps `posixpath` and `ntpath` as plain, always-importable modules and
+  lets `os.path` alias one at runtime. Here the choice is `#[cfg(windows)]`, made at
+  compile time, and **both modules stay always compiled and always tested** on every
+  host — which is what let `cargo test` on this Linux machine catch a real bug in the
+  Windows-target logic before it ever reached a Windows machine (see below).
+- `.github/workflows/release-matrix.yml` — five targets from `PORT_PLAN.md` decision 2:
+  `x86_64-unknown-linux-musl` (static), `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`,
+  `x86_64-apple-darwin`, `aarch64-apple-darwin`. **Actually run on GitHub's real runners,
+  not just written and assumed correct** — `gh workflow run` + `gh run watch`, three times,
+  fixing what each run found:
+  1. Both Windows legs failed at `git checkout`, before any Rust code ran: a committed
+     fixture path (`parity/fixtures/binary/xisf_mixed/registered/Light_BIN-1_.../Sh2 101_..._c_lps_r.xisf`,
+     a real WBPP-generated name) exceeds Windows' 260-character `MAX_PATH`. Fixed with
+     `git config --global core.longpaths true` before checkout — a repo/CI config issue,
+     not a code defect, and not worth shortening a fixture name that is itself evidence
+     (it's what the dedup regex is tested against).
+  2. With checkout fixed, `x86_64-pc-windows-msvc`'s `cargo test` failed on exactly one
+     test: `posix::abspath("rel").starts_with('/')`. `abspath` calls
+     `std::env::current_dir()`, and on that runner the real cwd is a Windows path with no
+     leading `/` — the assumption was correct on every host this code had run on so far,
+     and wrong on the first one that wasn't POSIX. Fixed by dependency injection:
+     `abspath_with_cwd(p, cwd)` takes the current directory as a parameter, and both
+     submodules' tests now supply a known synthetic cwd instead of reading the live one —
+     restoring the "tested identically on any host" property the module doc had claimed
+     before it was actually true.
+  3. **All five legs green** on the third run: `x86_64-unknown-linux-musl` and
+     `aarch64-apple-darwin` run the full test suite (132 tests) on their native
+     architecture; `x86_64-pc-windows-msvc` likewise; `aarch64-pc-windows-msvc` and
+     `x86_64-apple-darwin` cross-compile and build-verify only, since the runner's own
+     CPU cannot execute either result. Five binaries uploaded, 594–786 KB each.
+
 **Phase 4 — complete, 2026-09-08.** The FITS and XISF readers. The binary now runs
 from **real files on disk**: `astrobin-upload <dir> --config <ini>` scans, and a scan of
 `parity/fixtures/binary/Sadr Region` (221 real N.I.N.A. FITS) produces both artifacts
@@ -168,23 +212,18 @@ are live in this codebase (hazard 3) and `exporter::tests` pins the distinction.
 
 ## 🚀 Next Steps
 
-**Phase 5: `rayon` parallelism and the release matrix.** The port is now functionally
-complete — every phase of the pipeline, from a directory of FITS/XISF files to both
-artifacts, is byte-identical to Python v2.1.1. What is left is speed and packaging.
+**Phase 6: the differential harness in CI.** Everything else in `PORT_PLAN.md`'s six
+phases is done — the pipeline is byte-identical to Python v2.1.1 end to end, and the
+binary builds and passes its own tests on all five release targets.
 
-Two things to know before starting Phase 5:
-
-- **`extract_from_directories` is the only place worth parallelising**, and it is
-  already shaped for it: `scan_directories` produces the sorted path list, then each
-  file is read independently. The Python uses a `ProcessPoolExecutor` and reassembles
-  results *in the sorted dispatch order* rather than completion order; a `rayon`
-  `par_iter().map(...)` over the sorted list preserves order by construction, so the
-  hazard the Python had to work around does not arise. Row order is the whole ballgame
-  (hazard 8) — `check_readers.py` catches any regression.
-- **`pathutil.rs` is POSIX-only**, and the Windows targets in the release matrix need
-  `ntpath` semantics. That is the one file to fix.
-
-Then Phase 6 (differential harness in CI).
+What Phase 6 actually needs, distinct from the release matrix Phase 5 just built:
+running `check_parity.py` / `check_steps.py` / `check_reports.py` / `check_readers.py`
+themselves in CI — which means a runner with the sibling `AstroBinUploader` checkout,
+Python, pandas and configobj, not just `cargo test`. That is a different, heavier CI job
+than `release-matrix.yml`, and per `PORT_PLAN.md` decision 4 it is meant to run "during
+development and for one release of overlap, then retire" — not become permanent
+infrastructure. Decide the trigger (every push? PRs only?) and whether it blocks merges
+before building it; both change the shape of the workflow.
 
 The method that carried Phases 2 to 4 transfers again:
 
@@ -195,16 +234,21 @@ The method that carried Phases 2 to 4 transfers again:
 4. **Where the artifact rounds a value away, compare the value too.** The
    `--dump-report-stats` flag exists because a green summary diff says nothing about
    how a mean was summed; without it the pairwise transcription would be unverified.
-5. **Measure the library, do not reason about it.** Every surprise in Phases 3 and 4 —
-   the `to_string` header space, the trim loop, `pd.DataFrame(records)` inference,
-   astropy's compressed-header synthesis, the `.fz` exclusion — came from running the
-   Python and reading the answer, and several contradicted what the plan assumed.
+5. **Measure the library, do not reason about it.** Every surprise in Phases 3–5 — the
+   `to_string` header space, the trim loop, `pd.DataFrame(records)` inference, astropy's
+   compressed-header synthesis, the `.fz` exclusion, the Windows long-path failure, the
+   `abspath` test that only broke on a non-POSIX host — came from actually running
+   something (Python, or a real CI runner) and reading the answer. Phase 5 in particular
+   is the clearest case yet: writing the release-matrix YAML and reasoning about it would
+   have shipped both bugs undetected. Running it three times on real runners, fixing what
+   each run found, is what actually verified it.
 
 ## 📂 Files to Load
 
-- `PORT_PLAN.md` — plan of record. Phase 5 is the release matrix and `rayon`.
+- `PORT_PLAN.md` — plan of record. Phase 6 is the differential harness in CI.
 - The four harnesses — run all of them first to confirm the starting state is green:
   `check_parity.py`, `check_steps.py`, `check_reports.py`, `check_readers.py`.
-- `src/extractor.rs` — `scan_directories` is the seam Phase 5 parallelises.
-- `src/pathutil.rs` — POSIX-only; the Windows targets need `ntpath` semantics.
-- `Cargo.toml` — the release profile the matrix builds on.
+- `.github/workflows/release-matrix.yml` — the pattern a Phase 6 workflow should follow:
+  matrix jobs, real verification via `gh run watch`, not just written and trusted.
+- `PORT_PLAN.md`'s decision 4, on how much CI infrastructure this differential harness
+  is meant to become before it retires.

@@ -11,10 +11,12 @@ macOS — with no Python, no libcfitsio and no shared-library requirements. The
 FITS header reader is hand-written for exactly that reason; the whole binary
 depends on `clap`, `anyhow`, `chrono` and `roxmltree`.
 
-## Status: Phase 4 of 6
+## Status: Phase 5 of 6
 
-Functionally complete: a directory of FITS/XISF frames in, both artifacts out,
-byte-identical to Python v2.1.1. What remains is speed and packaging.
+Functionally complete and released for five platforms: a directory of
+FITS/XISF frames in, both artifacts out, byte-identical to Python v2.1.1, with
+`rayon` parallelism on the disk scan and a CI-verified build for Linux
+(`musl`, static), Windows (x86-64 and arm64) and macOS (x86-64 and arm64).
 
 | Phase | Scope | State |
 |---|---|---|
@@ -22,7 +24,7 @@ byte-identical to Python v2.1.1. What remains is speed and packaging.
 | 2 | The six pipeline steps | **done** |
 | 3 | Exporter and report formatting | **done** |
 | 4 | FITS and XISF readers | **done** |
-| 5 | Parallelism, release matrix | not started |
+| 5 | Parallelism, release matrix | **done** |
 | 6 | Differential harness in CI | not started |
 
 ```sh
@@ -103,6 +105,18 @@ $ python3 parity/check_readers.py    # the FITS and XISF readers, off real files
 3/3 scenario(s) passed.
 ```
 
+## Releases
+
+```sh
+gh workflow run release-matrix.yml
+```
+
+builds and (where the runner's own CPU can execute the result) tests all five
+targets: `x86_64-unknown-linux-musl` (fully static), `x86_64-pc-windows-msvc`,
+`aarch64-pc-windows-msvc`, `x86_64-apple-darwin`, `aarch64-apple-darwin`. No
+target needs a C toolchain of its own beyond musl's final link step — the
+whole point of hand-writing the FITS reader instead of binding cfitsio.
+
 `check_steps.py` compares the live Python pipeline's frames against this
 binary's, in a canonical form that survives the trip (floats as raw IEEE-754
 bits, so no repr disagreement can hide a difference). `check_reports.py`
@@ -119,7 +133,7 @@ checked against a target that existed before it did.
 
 ```sh
 cargo build --release      # target/release/astrobin-upload
-cargo test                 # 123 unit tests
+cargo test                 # 132 unit tests
 ```
 
 ## Corpus
