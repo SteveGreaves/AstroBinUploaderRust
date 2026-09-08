@@ -16,8 +16,20 @@ Each file isolates one rule of `_read_fits`:
                           not filter by XTENSION. This is remediation A7's bug.
   02_imagetyp_hdu2.fits   IMAGETYP is in HDU 2 and absent from 0 and 1 -- so
                           "first HDU carrying IMAGETYP", not "HDU 1".
-  03_no_imagetyp.fits     no HDU carries IMAGETYP; falls back to HDU 0 so
-                          [defaults] still applies.
+  03_no_imagetyp.fits     no HDU carries IMAGETYP, so the reader falls back to
+                          HDU 0 and reads the rest of the cards from there --
+                          verified at the extractor: the row comes out with
+                          FILTER, OBJECT and the rest intact and IMAGETYP NaN.
+                          The row is then **dropped by NormalizeHeadersStep**,
+                          and that is the point of the case. `[defaults]`
+                          injects per *column*, not per cell (upstream says so
+                          in reports.py's own comment), so `IMAGETYP = LIGHT`
+                          fills in only when no file in the scan had the
+                          keyword at all. Here its neighbours do, the column
+                          exists, this cell stays NaN, astype(str) makes it
+                          'NAN', and Stage 6 recognises no such frame type. So
+                          the blessed reference shows two Synthetic Target
+                          frames, not three.
   04_master_history.fits  ImageIntegration.numberOfImages spread across
                           repeated HISTORY cards. The reader must expose those
                           as a sequence -- last-write-wins loses the count.
@@ -148,11 +160,15 @@ CASES = [
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
+    # Clear the directory rather than just overwriting the cases: renaming a
+    # case would otherwise leave the old file behind, and a stray file in a
+    # scenario directory changes what a scan picks up.
+    for stale in OUT.iterdir():
+        if stale.is_file():
+            stale.unlink()
     entries = []
     for name, build, why in CASES:
         path = OUT / name
-        if path.exists():
-            path.unlink()
         build().writeto(path, output_verify="exception")
         entries.append({
             "path": f"synthetic/{name}",

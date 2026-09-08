@@ -108,25 +108,34 @@ def _read_header_blocks(f, offset: int):
 
 
 def _data_unit_size(cards):
+    """The data unit's size in bytes, padded to a whole number of blocks.
+
+    The standard's formula is
+
+        |BITPIX|/8 * GCOUNT * (PCOUNT + NAXIS1 * ... * NAXISn)
+
+    -- PCOUNT is inside the group multiply, not added after it. The two agree
+    whenever GCOUNT is 1, which every file in this corpus has, so getting it
+    wrong would stay invisible until someone regenerated the corpus from a
+    random-groups or multi-extension file and got a fixture truncated in the
+    wrong place rather than an obvious failure.
+    """
     try:
         bitpix = int(cards["BITPIX"])
         naxis = int(cards["NAXIS"])
     except (KeyError, ValueError):
         return None
+    if naxis == 0:
+        return 0  # NAXIS = 0 means there is no data array at all
     n = 1
     for i in range(1, naxis + 1):
         try:
             n *= int(cards[f"NAXIS{i}"])
         except (KeyError, ValueError):
             return None
-    if naxis == 0:
-        n = 0
-    size = n * abs(bitpix) // 8
-    for key, mult in (("PCOUNT", 1), ("GCOUNT", 0)):
-        pass
-    size += int(cards.get("PCOUNT", 0) or 0)
+    pcount = int(cards.get("PCOUNT", 0) or 0)
     gcount = int(cards.get("GCOUNT", 1) or 1)
-    size *= gcount
+    size = abs(bitpix) // 8 * gcount * (pcount + n)
     return ((size + 2879) // 2880) * 2880 if size else 0
 
 
@@ -232,8 +241,11 @@ def check() -> int:
         return 2
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     bad = 0
+    tracked = set()
     for name, scenario in manifest["scenarios"].items():
+        before = bad
         for e in scenario["files"]:
+            tracked.add(e["path"])
             p = BINARY / e["path"]
             if not p.exists():
                 print(f"[MISSING] {e['path']}")
@@ -241,7 +253,20 @@ def check() -> int:
             elif hashlib.sha256(p.read_bytes()).hexdigest() != e["sha256"]:
                 print(f"[CHANGED] {e['path']}")
                 bad += 1
-        print(f"[{'FAIL' if bad else 'OK'}] {name}: {len(scenario['files'])} file(s)")
+        print(f"[{'FAIL' if bad > before else 'OK'}] {name}: {len(scenario['files'])} file(s)")
+
+    # A file on disk that the manifest has never heard of is the failure mode
+    # most worth catching here: what a scan picks up, and in what order, is
+    # precisely what the Phase 4 harness compares. A stray file left by a
+    # half-finished regeneration would change the reference comparison while
+    # every hash still matched.
+    for p in sorted(BINARY.rglob("*")):
+        if not p.is_file() or p == MANIFEST:
+            continue
+        rel = str(p.relative_to(BINARY))
+        if rel not in tracked:
+            print(f"[UNTRACKED] {rel}")
+            bad += 1
     return 1 if bad else 0
 
 
