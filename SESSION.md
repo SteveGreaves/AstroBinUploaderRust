@@ -97,8 +97,23 @@ are live in this codebase (hazard 3) and `exporter::tests` pins the distinction.
   `\` and the drive letter too, so `C:\data\Sadr --test ...` would name its outputs
   differently under the two implementations. Harmless until Phase 5 ships Windows
   binaries; fix it there.
-- **`golden_tests/fixtures/binary/` does not exist upstream.** Phase 4 must build it
-  first, including a tile-compressed `.fits.fz` case.
+- **The binary corpus now exists** at `parity/fixtures/binary/` (241 files, 2.4 MiB of
+  content), built by the committed `parity/make_binary_fixtures.py` and
+  `parity/make_synthetic_fits.py`. Every real file is a header-only truncation, which
+  is lossless here — the pipeline never reads pixel data. Three scenarios:
+  `Sadr Region/` (221 FITS; **a live-Python scan of it reproduces the committed
+  `sadr` reference byte for byte**, so Phase 4's FITS reader has an end-to-end target
+  already in the repo), `xisf_mixed/` (14 files: lights, one raw frame per calibration
+  type, three PixInsight masters, WBPP `_c_lps_r` names), and `synthetic/` (6 generated
+  FITS isolating each HDU-selection rule). References for the latter two are
+  `parity/references/binary_*`, blessed from a live v2.1.1 **disk scan**.
+  `make_binary_fixtures.py --check` verifies the corpus without the source images.
+- **`PORT_PLAN.md`'s "tile-compressed `.fits.fz` case" is two cases, and the plan names
+  the less useful one.** The traversal filter is `('.fits', '.fit', '.fts', '.xisf')`
+  (`extractor.py:88`), so a file actually *named* `.fits.fz` is silently skipped and
+  never reaches the reader. A7's bug needs a compressed image inside a file named
+  `.fits`. `synthetic/01_compressed.fits` and `06_compressed.fits.fz` are byte-identical
+  and pin both halves.
 - Upstream tracker is clear; issues #9 and #10 remain open pending a re-test.
 - The user is **content** that their home address appears in the public upstream repo's
   golden references. Do not raise it again.

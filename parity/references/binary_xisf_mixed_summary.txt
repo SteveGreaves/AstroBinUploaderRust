@@ -1,0 +1,74 @@
+Observation session summary
+Generated 2026-09-08 18:22:39
+ Target: Sh2 101
+
+Site: Norton Close, Papworth Everard, South Cambridgeshire, Cambridgeshire, Cambridgeshire and Peterborough, England, CB23 3XT, United Kingdom
+	Latitude: 52.2484°
+	Longitude: -0.1232°
+	Bortle scale: 4.0
+	SQM: 21.00 mag/arcsec²
+
+Equipment used:
+	Telescope           : NP101is
+	Camera              : ZWO ASI6200MM Pro
+	Filterwheel         : Ascom.SxUFW (v2) 
+	Focuser             : FocusLynx Focuser 1
+	Rotator             : Manual Rotator
+	Capture software    : N.I.N.A. 3.2.0.9001 (x64)
+
+
+Observation period:
+	Start date               : 2026-07-29
+	End date                 : 2026-09-04
+	Days                     : 38
+	Observation sessions     : 2
+	Min temperature          : 12.5°C
+	Max temperature          : 21.0°C
+	Mean temperature         : 16.7°C
+
+
+ LIGHTS:
+ Target: Sh2 101
+
+ Filter   Frames   Gain     Egain        Mean FWHM    Sensor Temp  Mean Temp    Exposure        Total Exposure 
+ Blue     5        0        0.78 e/ADU   4.34 arcsec  -10.0°C      12.5°C       60.00 secs           0 hrs      5 mins   0.00 secs
+ Ha       2        100      0.25 e/ADU   4.31 arcsec  -10.0°C      20.9°C       600.00 secs          0 hrs     20 mins   0.00 secs
+
+ Exposure time for Sh2 101: 0 hrs 25 mins 0.00 secs
+
+
+Total LIGHT Exposure Time: 0 hrs 25 mins 0.00 secs
+
+
+ MASTERFLATS:
+
+ Filter     Frames   Gain       Egain           Exposure     Total Exposure 
+ Blue       1        0          0.78 e/ADU      0.51 secs         0 hrs      0 mins   0.51 secs
+ Ha         100      100        0.25 e/ADU      1.22 secs         0 hrs      2 mins   2.00 secs
+
+Total FLAT Exposure Time: 0 hrs 2 mins 2.51 secs
+
+
+ MASTERBIAS:
+
+ Filter     Frames   Gain       Egain           Exposure     Total Exposure 
+            100      100        0.25 e/ADU      0.00 secs         0 hrs      0 mins   0.00 secs
+
+Total BIAS Exposure Time: 0 hrs 0 mins 0.00 secs
+
+
+ MASTERDARKS:
+
+ Filter     Frames   Gain       Egain           Exposure     Total Exposure 
+            50       100        0.25 e/ADU      600.00 secs       8 hrs     20 mins   0.00 secs
+
+Total DARK Exposure Time: 8 hrs 20 mins 0.00 secs
+
+
+ Total number of images processed: 14
+
+xisf_mixed_acquisition.csv
+
+       date filter  number  duration  binning  gain  sensorCooling  fNumber  darks  flats  flatDarks  bias  bortle  meanSqm  meanFwhm  temperature
+ 2026-07-29   4663       2     600.0      1.0   100          -10.0      5.4     50    100          0   100     4.0     21.0      4.31         20.9
+ 2026-09-04   4637       5      60.0      1.0     0          -10.0      5.4      0      1          0     0     4.0     21.0      4.34         12.5

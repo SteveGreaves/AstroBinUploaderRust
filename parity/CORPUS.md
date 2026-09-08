@@ -69,6 +69,55 @@ predated remediation A14 and showed `Ha` on the MASTERDARKS and MASTERBIAS
 rows, where v2.1.1 correctly leaves the filter blank for filter-independent
 calibration types. That is exactly the misleading label A14 fixed.
 
+## Binary corpus — `fixtures/binary/` (2026-09-08)
+
+Phase 4's readers need FITS and XISF files to test against, and neither this
+repository nor upstream has ever had any (`REMEDIATION_PLAN.md` P0 item 3 was
+never done). Built by `make_binary_fixtures.py` and `make_synthetic_fits.py`,
+which are committed alongside it; the first needs the maintainer's image
+library, the second needs only astropy.
+
+Every real file is a **header-only truncation**. The pipeline reads headers and
+never touches pixel data, so cutting the file off after the header loses
+nothing — verified: astropy returns an identical header dict from the
+truncated copy, and `_read_xisf` only ever reads the XML block. A 122 MB frame
+becomes 5.6 KiB, a 734 MB PixInsight master becomes 190 KiB.
+
+| Scenario | Files | Size | What it is for |
+|---|---|---|---|
+| `Sadr Region/` | 221 | 1.2 MiB | The whole Sadr FITS tree, structure and names preserved. **A live-Python scan of it reproduces `references/sadr_*` byte for byte**, so the FITS reader gets an end-to-end target that already exists. Also the only fixture exercising traversal order over a real four-level tree, and its directory name carries the space that `basename.replace(" ", "_")` has to handle. |
+| `xisf_mixed/` | 14 | 1.1 MiB | Lights in two filters, one raw frame of each calibration type, three PixInsight masters (`ImageIntegration.numberOfImages` in HISTORY — and `Master Bias`/`Master Dark` carry no FILTER, so this is the first fixture reaching the blank-filter calibration rows), and WBPP `_c_lps_r` names that collide with their originals under the dedup regex. |
+| `synthetic/` | 6 | 56 KiB | Branches no real file on this machine reaches. |
+
+References for the latter two are `references/binary_*`, blessed from a live
+v2.1.1 **disk scan** rather than a `--test` replay — the scan is the thing
+being tested. `SOURCE_PATH` holds an absolute path and so varies by machine,
+but it never reaches either artifact, so the references are portable.
+
+`make_binary_fixtures.py --check` verifies the committed corpus against
+`fixtures/binary/MANIFEST.json` without needing the source images.
+
+### The synthetic cases, and one measured surprise
+
+`PORT_PLAN.md` asked for "a tile-compressed `.fits.fz` case". Measured, that is
+two different cases, and the plan's phrasing picks the less useful one:
+
+- The traversal filter is `('.fits', '.fit', '.fts', '.xisf')`
+  (`extractor.py:88`), so a file actually **named** `.fits.fz` is silently
+  skipped and never reaches the reader at all.
+- The case remediation A7 was written for is a tile-compressed image inside a
+  file named `.fits` — HDU 0 holding only `SIMPLE`/`BITPIX`/`NAXIS`/`EXTEND`
+  and the real metadata on a `ZIMAGE = T` BINTABLE extension.
+
+`01_compressed.fits` and `06_compressed.fits.fz` are byte-identical and differ
+only in extension, pinning both halves: the reader must walk every HDU header,
+and the traversal must reproduce the exclusion rather than improving on it.
+
+Verified against the live extractor: 5 of the 6 files are picked up (`06` is
+skipped); `01` and `02` find `IMAGETYP` on HDUs 1 and 2 respectively; `03`
+finds none and falls back to HDU 0; `04` reads `NUMBER = 50` out of repeated
+HISTORY cards; `05` has its quotes and padding stripped.
+
 ## Not yet covered by any fixture
 
 - **`DARKFLAT` / `MASTERDARKFLATS`.** 200 darkflat frames exist at
