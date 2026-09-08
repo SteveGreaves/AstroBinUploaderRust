@@ -91,6 +91,17 @@ fn py_divmod(vx: f64, wx: f64) -> (f64, f64) {
 /// tables; the bare form ends each per-target and per-type total.
 fn seconds_to_hms(seconds: f64, aligned: bool) -> String {
     if !seconds.is_finite() {
+        crate::log_debug!(
+            "seconds_to_hms",
+            46,
+            "seconds_to_hms could not format {}: {}",
+            if seconds.is_nan() { "nan".to_string() } else if seconds > 0.0 { "inf".to_string() } else { "-inf".to_string() },
+            if seconds.is_nan() {
+                "cannot convert float NaN to integer"
+            } else {
+                "cannot convert float infinity to integer"
+            }
+        );
         // `int(nan)` raises ValueError and `int(inf)` OverflowError; the
         // Python catches both and returns the *unaligned* zero string
         // regardless of `aligned`, so the fallback is deliberately not

@@ -141,6 +141,9 @@ pub fn extract_from_directories(paths: &[String], progress: bool) -> Result<Tabl
     use std::io::Write;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    for path in paths {
+        crate::log_info!("extract_from_directories", 85, "Scanning directory: {path}");
+    }
     let files = scan_directories(paths)?;
     let total = files.len();
 
@@ -181,6 +184,11 @@ pub fn extract_from_directories(paths: &[String], progress: bool) -> Result<Tabl
                     // warnings is unspecified, unlike the Python's
                     // single-process log.
                     eprintln!("warning: error parsing headers for {p}: {e}");
+                    crate::log_error!(
+                        "extract_single_file",
+                        192,
+                        "Error parsing headers for {p}: {e}"
+                    );
                     None
                 }
             };
@@ -192,6 +200,12 @@ pub fn extract_from_directories(paths: &[String], progress: bool) -> Result<Tabl
             result
         })
         .collect();
+    crate::log_info!(
+        "extract_from_directories",
+        132,
+        "Extraction complete. {} valid headers retrieved.",
+        results.iter().filter(|r| r.is_some()).count()
+    );
     if progress {
         // `print("\n")` on the Python side -- the string "\n" plus print's
         // own trailing newline, i.e. a blank line after the progress bar,
@@ -264,12 +278,31 @@ fn has_scan_extension(name: &str) -> bool {
 /// `extract_single_file`: dispatch on extension, strip quotes, then add the
 /// three fields the readers do not come up with themselves.
 pub fn extract_single_file(path: &str) -> Result<Record> {
+    crate::log_debug!(
+        "extract_single_file",
+        165,
+        "Processing headers for file: {}",
+        pathutil::basename(path)
+    );
     let lower = path.to_lowercase();
     let mut hdr = if FITS_EXTENSIONS.iter().any(|e| lower.ends_with(e)) {
-        crate::fits::read_fits(path)?
+        let hdr = crate::fits::read_fits(path)?;
+        crate::log_debug!(
+            "extract_single_file",
+            169,
+            "Successfully read FITS header from {path}"
+        );
+        hdr
     } else if lower.ends_with(".xisf") {
-        crate::xisf::read_xisf(path)?
+        let hdr = crate::xisf::read_xisf(path)?;
+        crate::log_debug!(
+            "extract_single_file",
+            172,
+            "Successfully read XISF header from {path}"
+        );
+        hdr
     } else {
+        crate::log_warning!("extract_single_file", 174, "Unsupported file format: {path}");
         anyhow::bail!("unsupported file format");
     };
 
@@ -284,7 +317,52 @@ pub fn extract_single_file(path: &str) -> Result<Record> {
         col::SOURCE_PATH_RAW,
         HeaderValue::Str(pathutil::abspath(path)),
     );
+
+    // The "Horizontal Header Printing" the README calls an essential DEBUG
+    // requirement: the whole cleaned dictionary, as `repr(dict)` renders it.
+    crate::log_debug!(
+        "extract_single_file",
+        188,
+        "Recovered Header: {}",
+        python_dict_repr(&cleaned)
+    );
     Ok(cleaned)
+}
+
+/// `repr(dict)` for a header record -- `{'KEY': value, ...}` in insertion
+/// order, each value rendered as Python's own `repr`.
+fn python_dict_repr(r: &Record) -> String {
+    let body: Vec<String> = r
+        .keys
+        .iter()
+        .map(|k| format!("{}: {}", py_str(k), py_repr(r.values.get(k).unwrap())))
+        .collect();
+    format!("{{{}}}", body.join(", "))
+}
+
+/// `repr(str)`: single quotes unless the value itself contains one and no
+/// double quote, which is the only case CPython switches quoting style for.
+fn py_str(s: &str) -> String {
+    if s.contains('\'') && !s.contains('"') {
+        format!("\"{}\"", s.replace('\\', "\\\\"))
+    } else {
+        format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
+    }
+}
+
+fn py_repr(v: &HeaderValue) -> String {
+    match v {
+        HeaderValue::Bool(b) => (if *b { "True" } else { "False" }).to_string(),
+        HeaderValue::Int(n) => n.to_string(),
+        // `repr(float)` is the shortest string that round-trips, and always
+        // carries a `.0` for a whole number -- which is what Rust's `{:?}`
+        // for f64 produces too.
+        HeaderValue::Float(f) => format!("{f:?}"),
+        HeaderValue::Str(s) => py_str(s),
+        // astropy hands a commentary card back as a _HeaderCommentaryCards
+        // object whose repr is its lines joined by newlines.
+        HeaderValue::Commentary(lines) => py_str(&lines.join("\n")),
+    }
 }
 
 /// `_get_fit_number`: a PixInsight master records how many sub-exposures went

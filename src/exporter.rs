@@ -162,23 +162,22 @@ pub fn export(
         // `self.logger.warning("Export requested but aggregated data is
         // empty.")` and no files at all.
         eprintln!("Export requested but aggregated data is empty.");
+        crate::log_warning!("export", 53, "Export requested but aggregated data is empty.");
         return Ok(None);
     }
 
     let acq = build_acquisition(agg)?;
-    std::fs::write(
-        out_dir.join(format!("{basename}_acquisition.csv")),
-        to_csv(&acq),
-    )?;
+    let acq_path = out_dir.join(format!("{basename}_acquisition.csv"));
+    std::fs::write(&acq_path, to_csv(&acq))?;
+    crate::log_info!("export", 124, "Acquisition CSV saved: {}", acq_path.display());
 
     let mut summary = crate::reports::generate_full_summary(agg, total_scanned, now);
     let df_string = to_string_index_false(&acq).replace('\n', "\n ");
     summary.push_str(&format!("\n{basename}_acquisition.csv\n\n {df_string}\n"));
 
-    std::fs::write(
-        out_dir.join(format!("{basename}_session_summary.txt")),
-        &summary,
-    )?;
+    let summary_path = out_dir.join(format!("{basename}_session_summary.txt"));
+    std::fs::write(&summary_path, &summary)?;
+    crate::log_info!("export", 148, "Session summary saved: {}", summary_path.display());
     Ok(Some(summary))
 }
 

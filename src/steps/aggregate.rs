@@ -39,9 +39,11 @@ enum Rule {
 }
 
 pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
+    crate::log_info!("execute", 45, "Aggregating parameters...");
     if table.n_rows == 0 {
         return Ok(table.clone());
     }
+    crate::log_debug!("execute", 50, "Performing temporal normalization");
 
     // --- Stage 1: temporal normalisation ------------------------------------
     let Some(date_col) = table.column(col::DATE_OBS) else {
@@ -104,6 +106,7 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
     };
 
     // --- Stage 2: session dates ---------------------------------------------
+    crate::log_debug!("execute", 84, "Applying overnight date shifting");
     let session_date: Vec<String> = if cfg.use_obs_date {
         dates
             .iter()
@@ -172,6 +175,11 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
     df.set_scalar("num_days", Cell::Int(num_days));
 
     // --- Stage 3: aggregation -----------------------------------------------
+    let n_lights = is_light.iter().filter(|&&b| b).count();
+    if n_lights > 0 {
+        crate::log_debug!("execute", 117, "Aggregating {n_lights} light frame(s).");
+    }
+    crate::log_debug!("execute", 120, "Grouping and summarizing metadata");
     let agg_cols = [
         col::SITE_NAME,
         "session_date",
@@ -352,12 +360,26 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
             .map(|c| {
                 let name = astype_str(c);
                 let name = name.trim();
-                let code = cfg
-                    .filters
-                    .iter()
-                    .find(|(k, _)| k == name)
-                    .map(|(_, v)| v.as_str())
-                    .unwrap_or_else(|| name.to_string());
+                let code = match cfg.filters.iter().find(|(k, _)| k == name) {
+                    Some((_, v)) => {
+                        let code = v.as_str().to_string();
+                        crate::log_debug!(
+                            "map_filter",
+                            215,
+                            "Filter Mapping: SUCCESS - Mapped '{name}' to code '{code}'"
+                        );
+                        code
+                    }
+                    None => {
+                        crate::log_debug!(
+                            "map_filter",
+                            218,
+                            "Filter Mapping: FAILURE - No code found for '{name}', \
+                             using original name."
+                        );
+                        name.to_string()
+                    }
+                };
                 Cell::Str(code)
             })
             .collect();

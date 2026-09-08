@@ -55,3 +55,51 @@ pub mod image_type {
     pub const MASTER_DARKFLAT: &str = "MASTERDARKFLAT";
     pub const DARK_FLAT: &str = "DARKFLAT";
 }
+
+/// `_KNOWN_OVERRIDE_TARGETS`: every `InternalColumns` value, lower-cased.
+///
+/// The loader warns when an `[override]` or `[equipmentoverrides]` target is
+/// not one of these, because such an entry silently creates a phantom column
+/// nothing consumes -- the shipped config's `SWCREATOR = CREATOR` ('swcreator',
+/// not 'swcreate') has never done anything. Held sorted, since the warning
+/// interpolates `', '.join(sorted(...))` verbatim.
+pub const KNOWN_OVERRIDE_TARGETS: [&str; 38] = [
+    "bortle",
+    "ccd-temp",
+    "date-obs",
+    "egain",
+    "end_date",
+    "exposure",
+    "filename",
+    "filter",
+    "focallen",
+    "focname",
+    "focratio",
+    "foctemp",
+    "fwheel",
+    "fwhm",
+    "gain",
+    "gain_match",
+    "hfr",
+    "imagetyp",
+    "imscale",
+    "instrume",
+    "num_days",
+    "number",
+    "object",
+    "rotantang",
+    "rotname",
+    "sessions",
+    "site",
+    "sitelat",
+    "sitelong",
+    "source_path",
+    "sqm",
+    "start_date",
+    "swcreate",
+    "telescop",
+    "temp_max",
+    "temp_min",
+    "xbinning",
+    "xpixsz",
+];

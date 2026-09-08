@@ -10,6 +10,7 @@
 mod appconfig;
 mod cli;
 mod config;
+mod logging;
 mod datetime;
 mod constants;
 mod dump;
@@ -46,30 +47,20 @@ fn main() -> Result<()> {
         }
     }
 
-    // Unlike Python, a missing config is an error rather than a prompt to
-    // generate a template: template generation is an interactive convenience
-    // that has no place in a binary the differential harness drives.
-    if !args.config.exists() {
-        bail!(
-            "configuration file not found: {} (the Rust port does not \
-             auto-generate one; use the Python entry point for that)",
-            args.config.display()
-        );
-    }
-    let cfg = ConfigFile::parse_file(&args.config)
-        .with_context(|| format!("parsing {}", args.config.display()))?;
-
     if args.dump_parity {
+        let cfg = load_config(&args)?;
         dump_parity(&cfg, args.test.as_deref())?;
         return Ok(());
     }
 
     if args.dump_steps {
+        let cfg = load_config(&args)?;
         dump_steps(&cfg, &args)?;
         return Ok(());
     }
 
     if args.dump_report_stats {
+        let cfg = load_config(&args)?;
         dump_report_stats(&cfg, &args)?;
         return Ok(());
     }
@@ -89,6 +80,27 @@ fn main() -> Result<()> {
 
     let basename = pathutil::basename(&first).replace(' ', "_");
 
+    // Opened before the configuration is read, so a configuration error is
+    // itself logged -- which is why `load_config` is called below this rather
+    // than with the dump paths above.
+    logging::init(&out_dir.join("AstroBinUploader.log"), args.debug);
+    log_info!("main", 158, "Logging initialized.");
+    log_info!("main", 163, "main version: {}", env!("CARGO_PKG_VERSION"));
+    log_info!("main", 164, "utils version: {}", env!("CARGO_PKG_VERSION"));
+    // `sys.argv` rendered as Python renders a list of strings. It can only
+    // ever be *this* program's argv, so argv[0] is the binary rather than a
+    // .py file; the shape of the line is what matches, not its first element.
+    log_info!(
+        "main",
+        165,
+        "Calling function and arguments provided: [{}]",
+        std::env::args()
+            .map(|a| format!("'{a}'"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    log_info!("main", 166, "");
+
     println!("Output directory: {}", out_dir.display());
     // The "legacy-compliant console boot sequence" main() prints verbatim.
     // `utils version` names a module that has not existed since v2.0 and
@@ -98,6 +110,11 @@ fn main() -> Result<()> {
     println!("main version: {}", env!("CARGO_PKG_VERSION"));
     println!("utils version: {}", env!("CARGO_PKG_VERSION"));
 
+    let cfg = load_config(&args)?;
+    // Built here rather than after extraction: the Python `AppConfig(...)`
+    // constructor runs inside `ConfigLoader.load`, so the warnings its
+    // normalisers emit land before the scan's records, not after them.
+    let app = crate::appconfig::AppConfig::from_config(&cfg)?;
     let raw = load_headers(&args, true)?;
 
     // Written only on the scan path: the export sits in the `else` branch of
@@ -107,12 +124,18 @@ fn main() -> Result<()> {
         let path = pathutil::join(&out_dir_str, "debug_step_00_RawHeaders.csv");
         std::fs::write(&path, exporter::to_csv(&raw))
             .with_context(|| format!("writing {path}"))?;
+        log_info!("main", 195, "Raw scanned headers exported to {path}");
     }
 
-    let app = crate::appconfig::AppConfig::from_config(&cfg)?;
     let agg = match run_pipeline(&raw, &app, Some(out_dir_str.as_str()), args.debug) {
         Ok(agg) => agg,
         Err(e) => {
+            log_error!(
+                "main",
+                226,
+                "The application encountered a fatal error and must exit."
+            );
+            log_error!("main", 227, "{e}");
             // main()'s final safety net. The dump is deliberately non-fatal
             // -- it runs while the program is already dying and must never
             // itself raise -- and `--test` is not excluded here, unlike the
@@ -121,7 +144,10 @@ fn main() -> Result<()> {
                 let path = pathutil::join(&out_dir_str, "emergency_raw_dump.csv");
                 match std::fs::write(&path, exporter::to_csv(&raw)) {
                     Ok(()) => println!("Emergency data dump saved to: {path}"),
-                    Err(err) => eprintln!("Emergency data dump also failed: {err}"),
+                    Err(err) => {
+                        eprintln!("Emergency data dump also failed: {err}");
+                        log_debug!("main", 240, "Emergency data dump also failed: {err}");
+                    }
                 }
             }
             return Err(e);
@@ -137,6 +163,37 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// `ConfigLoader.load`.
+///
+/// Unlike Python, a missing config is an error rather than a prompt to
+/// generate a template: template generation is an interactive convenience
+/// that has no place in a binary the differential harness drives. The
+/// `logger.error` for a missing *custom* config is Python's own.
+fn load_config(args: &Cli) -> Result<ConfigFile> {
+    if !args.config.exists() {
+        log_error!(
+            "load",
+            68,
+            "Custom configuration file missing: {}",
+            args.config.display()
+        );
+        bail!(
+            "configuration file not found: {} (the Rust port does not \
+             auto-generate one; use the Python entry point for that)",
+            args.config.display()
+        );
+    }
+    let cfg = ConfigFile::parse_file(&args.config)
+        .with_context(|| format!("parsing {}", args.config.display()))?;
+    log_info!(
+        "load",
+        81,
+        "Configuration loaded and normalized from {}",
+        args.config.display()
+    );
+    Ok(cfg)
+}
+
 /// The raw header frame: injected from a CSV, or scanned off disk.
 ///
 /// The two build their frames by different rules -- see `extractor.rs`'s
@@ -150,13 +207,25 @@ fn load_headers(args: &Cli, announce: bool) -> Result<Table> {
         println!("\nReading FITS headers...\n");
     }
     match args.test.as_deref() {
-        Some(csv) => Table::read_csv_upper(csv)
-            .with_context(|| format!("ingesting {}", csv.display())),
+        Some(csv) => {
+            log_info!(
+                "extract_from_csv",
+                148,
+                "Injecting metadata from CSV: {}",
+                csv.display()
+            );
+            Table::read_csv_upper(csv).with_context(|| format!("ingesting {}", csv.display()))
+        }
         None => {
+            // `[os.path.abspath(os.path.expanduser(p)) for p in ...]`: the
+            // extractor is handed resolved paths, which is what the log
+            // records and what every scanned filename is built from. (The
+            // basename the artifacts are named after still comes from the
+            // raw argument -- see above.)
             let paths: Vec<String> = args
                 .directory_paths
                 .iter()
-                .map(|p| p.to_string_lossy().into_owned())
+                .map(|p| pathutil::abspath(&p.to_string_lossy()))
                 .collect();
             extractor::extract_from_directories(&paths, announce)
         }
@@ -179,60 +248,153 @@ fn run_pipeline(
     out_dir: Option<&str>,
     debug: bool,
 ) -> Result<Table> {
-    // `_dump_debug_csv`'s own three-way priority: the aggregated frame at the
-    // aggregation step, else the processed frame, else -- at step 1 only --
-    // the raw frame. When every candidate is empty it writes nothing at all,
-    // rather than a header-only file.
-    let dump = |i: usize, name: &str, suffix: &str, candidates: &[&Table]| {
+    // `PipelineProcessor.add_step`, once per registration, before the run.
+    for name in STEP_NAMES {
+        log_debug!("add_step", 66, "Registered pipeline step: {name}");
+    }
+    log_info!("run", 83, "Processing state initialized");
+    log_info!(
+        "run",
+        84,
+        "Pipeline execution started: {} steps registered.",
+        STEP_NAMES.len()
+    );
+
+    // Each candidate carries the Python line its `logger.debug` sits on, so
+    // the record names the branch `_dump_debug_csv` actually took: the
+    // aggregated frame, the processed frame, or -- at step 1 only -- the raw
+    // one. When every candidate is empty it writes nothing at all.
+    let dump = |i: usize, name: &str, suffix: &str, candidates: &[(&Table, u32)]| {
         let Some(dir) = out_dir else { return };
-        let Some(t) = debug_dump_target(candidates) else { return };
+        let frames: Vec<&Table> = candidates.iter().map(|(t, _)| *t).collect();
+        let Some(chosen) = debug_dump_target(&frames) else {
+            return;
+        };
+        let line = candidates
+            .iter()
+            .find(|(t, _)| std::ptr::eq(*t, chosen))
+            .map(|(_, l)| *l)
+            .unwrap_or(134);
         let path = pathutil::join(dir, &format!("debug_step_{i:02}_{name}{suffix}.csv"));
-        // `_dump_debug_csv` swallows its own failures ("Failed to save debug
-        // CSV for {step}") rather than killing a run that was otherwise fine.
-        if let Err(e) = std::fs::write(&path, exporter::to_csv(t)) {
-            eprintln!("Failed to save debug CSV for {name}: {e}");
+        match std::fs::write(&path, exporter::to_csv(chosen)) {
+            Ok(()) => match line {
+                129 => log_debug!("_dump_debug_csv", 129, "Saved debug state (aggregated) to {path}"),
+                139 => log_debug!("_dump_debug_csv", 139, "Saved debug state (raw) to {path}"),
+                _ => log_debug!("_dump_debug_csv", 134, "Saved debug state to {path}"),
+            },
+            // `_dump_debug_csv` swallows its own failures rather than killing
+            // a run that was otherwise fine.
+            Err(e) => {
+                eprintln!("Failed to save debug CSV for {name}: {e}");
+                log_error!("_dump_debug_csv", 142, "Failed to save debug CSV for {name}: {e}");
+            }
         }
     };
 
+    // The dump of the state a failing step was handed, plus the three records
+    // `run`'s except-branch writes.
+    let crashed = |i: usize, name: &str, candidates: &[(&Table, u32)], e: &anyhow::Error| {
+        if out_dir.is_some() {
+            dump(i, name, "_CRASH_DIAGNOSTIC", candidates);
+            log_info!("run", 104, "Emergency diagnostic state saved to {}", out_dir.unwrap());
+        }
+        log_error!("run", 109, "CRITICAL FAILURE in [{name}]: {e}");
+        log_error!("run", 112, "{e}");
+    };
+
+    // Steps 2-5: one candidate on success (the processed frame), one on
+    // failure (the frame the step was handed, which is what `state` still
+    // holds).
     macro_rules! step {
         ($i:expr, $name:expr, $input:expr, $call:expr) => {
             match $call {
                 Ok(out) => {
                     if debug {
-                        dump($i, $name, "", &[&out]);
+                        dump($i, $name, "", &[(&out, 134)]);
                     }
                     out
                 }
                 Err(e) => {
-                    dump($i, $name, "_CRASH_DIAGNOSTIC", &[$input, raw]);
+                    crashed($i, $name, &[($input, 134)], &e);
                     return Err(e);
                 }
             }
         };
     }
 
-    let df = step!(1, "NormalizeHeadersStep", raw, steps::normalize::execute(raw, app));
+    // Step 1 is the only one whose empty result falls back to the raw frame,
+    // per `_dump_debug_csv`'s `elif step_index == 1`, and the only one whose
+    // crash dump is of the raw frame for the same reason -- `processed_df` is
+    // still empty when the first step raises.
+    log_debug!("run", 89, "Executing step: {}", STEP_NAMES[0]);
+    let df = match steps::normalize::execute(raw, app) {
+        Ok(out) => {
+            if debug {
+                dump(1, "NormalizeHeadersStep", "", &[(&out, 134), (raw, 139)]);
+            }
+            out
+        }
+        Err(e) => {
+            crashed(1, "NormalizeHeadersStep", &[(raw, 139)], &e);
+            return Err(e);
+        }
+    };
+    log_debug!("run", 89, "Executing step: {}", STEP_NAMES[1]);
     let df = step!(2, "OpticalParameterStep", &df, steps::optical::execute(&df, app));
-    let df = step!(3, "DeduplicateStep", &df, steps::deduplicate::execute(&df));
-    let df = step!(4, "CalibrationMatcherStep", &df, steps::calibration::execute(&df));
+    log_debug!("run", 89, "Executing step: {}", STEP_NAMES[2]);
+    let (df, labels) = {
+        let input = df;
+        match steps::deduplicate::execute_labelled(&input) {
+            Ok((out, labels)) => {
+                if debug {
+                    dump(3, "DeduplicateStep", "", &[(&out, 134)]);
+                }
+                (out, labels)
+            }
+            Err(e) => {
+                crashed(3, "DeduplicateStep", &[(&input, 134)], &e);
+                return Err(e);
+            }
+        }
+    };
+    log_debug!("run", 89, "Executing step: {}", STEP_NAMES[3]);
+    let df = step!(
+        4,
+        "CalibrationMatcherStep",
+        &df,
+        steps::calibration::execute_labelled(&df, &labels)
+    );
+    log_debug!("run", 89, "Executing step: {}", STEP_NAMES[4]);
     let df = step!(5, "GeocodeStep", &df, steps::geocode::execute(&df, app));
 
     // The aggregation step is the one place the dump prefers a different
     // frame: `aggregated_df` when it has rows, falling back to the frame that
     // went in when it does not.
+    log_debug!("run", 89, "Executing step: {}", STEP_NAMES[5]);
     match steps::aggregate::execute(&df, app) {
         Ok(agg) => {
             if debug {
-                dump(6, "AggregationStep", "", &[&agg, &df]);
+                dump(6, "AggregationStep", "", &[(&agg, 129), (&df, 134)]);
             }
+            log_info!("run", 117, "Pipeline execution completed successfully.");
             Ok(agg)
         }
         Err(e) => {
-            dump(6, "AggregationStep", "_CRASH_DIAGNOSTIC", &[&df, raw]);
+            crashed(6, "AggregationStep", &[(&df, 134)], &e);
             Err(e)
         }
     }
 }
+
+/// The Python step class names, in registration order.
+const STEP_NAMES: [&str; 6] = [
+    "NormalizeHeadersStep",
+    "OpticalParameterStep",
+    "DeduplicateStep",
+    "CalibrationMatcherStep",
+    "GeocodeStep",
+    "AggregationStep",
+];
 
 /// `_dump_debug_csv`'s frame choice: the first candidate that has rows, in
 /// the priority order the caller lists them, and `None` when every one is

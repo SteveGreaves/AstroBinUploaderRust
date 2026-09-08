@@ -24,6 +24,11 @@ const ARCSEC_PER_RADIAN: f64 = 206.265;
 const FWHM_TO_HFR_RATIO: f64 = 2.0;
 
 pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
+    crate::log_info!(
+        "execute",
+        67,
+        "Processing optical parameters and calculating star metrics"
+    );
     let mut df = table.clone();
     if df.n_rows == 0 {
         return Ok(df);
@@ -106,6 +111,12 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
         }
     }
 
+    crate::log_debug!(
+        "execute",
+        119,
+        "Computed optical metrics for {} light frame(s).",
+        lights.len()
+    );
     Ok(df)
 }
 

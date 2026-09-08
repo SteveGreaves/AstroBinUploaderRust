@@ -33,14 +33,31 @@ const CHAIN_TOKENS: &[&str] = &["cc", "rn", "r", "d", "b", "s", "lps"];
 const EXTENSIONS: &[&str] = &[".xisf", ".fits", ".fit", ".fts"];
 
 pub fn execute(table: &Table) -> Result<Table> {
+    Ok(execute_labelled(table)?.0)
+}
+
+/// As `execute`, plus each surviving row's position in the *input* frame.
+///
+/// `pd.DataFrame(final_rows)` builds its index from the name of each row
+/// Series, so pandas carries the pre-dedup label through this step's
+/// reordering. `CalibrationMatcherStep` prints that label, and nothing else
+/// in the port needs to know it -- which is why it is returned here rather
+/// than carried as a column.
+pub fn execute_labelled(table: &Table) -> Result<(Table, Vec<usize>)> {
+    crate::log_info!("execute", 39, "Executing WBPP deduplication filter");
     let mut df = table.clone();
+    let identity = |n: usize| (0..n).collect::<Vec<usize>>();
     if df.n_rows == 0 {
-        return Ok(df);
+        let n = df.n_rows;
+        return Ok((df, identity(n)));
     }
 
     let filenames: Vec<String> = match df.column(col::FILENAME) {
         Some(c) => c.cells.iter().map(astype_str).collect(),
-        None => return Ok(df),
+        None => {
+            let n = df.n_rows;
+            return Ok((df, identity(n)));
+        }
     };
 
     // A row whose filename does not parse has no base name, and pandas drops
@@ -54,6 +71,15 @@ pub fn execute(table: &Table) -> Result<Table> {
                 "warning: SOURCE_PATH column absent (--test CSV predates A2) -- \
                  deduplicating on filename alone, which can merge \
                  identically-named captures from different directories."
+            );
+            crate::log_warning!(
+                "execute",
+                78,
+                "SOURCE_PATH column absent (--test CSV predates A2) -- \
+                 deduplicating on filename alone, which can merge \
+                 identically-named captures from different directories. \
+                 Re-run with a live directory scan, or a fixture captured by \
+                 the current version, to get directory-aware dedup."
             );
             vec![String::new(); df.n_rows]
         }
@@ -81,19 +107,48 @@ pub fn execute(table: &Table) -> Result<Table> {
         // The sort is stable, so a genuine tie is settled by input order,
         // which the extractor makes deterministic (A9 upstream).
         let mut group: Vec<usize> = keyed[g..end].iter().map(|(_, i)| *i).collect();
+        // The `dropped` list is built from the group in its *pre-sort* order,
+        // which is the order the rows arrived in.
+        let arrival = group.clone();
         group.sort_by_key(|&i| (ext_rank(&filenames[i]), filenames[i].chars().count()));
-        kept.push(group[0]);
+        let winner = group[0];
+        if arrival.len() > 1 {
+            let dropped: Vec<String> = arrival
+                .iter()
+                .filter(|&&i| filenames[i] != filenames[winner])
+                .map(|&i| format!("'{}'", filenames[i]))
+                .collect();
+            crate::log_debug!(
+                "execute",
+                122,
+                "Deduplication: kept '{}', dropped [{}] (same base '{}' in '{}')",
+                filenames[winner],
+                dropped.join(", "),
+                keyed[g].0 .1,
+                keyed[g].0 .0
+            );
+        }
+        kept.push(winner);
         g = end;
     }
 
     if kept.is_empty() {
         // `if final_rows:` — an empty selection leaves the frame alone rather
         // than replacing it with an empty one.
-        return Ok(df);
+        let n = df.n_rows;
+        return Ok((df, identity(n)));
     }
 
+    if kept.len() != df.n_rows {
+        crate::log_info!(
+            "execute",
+            132,
+            "Deduplication: Removed {} duplicate/intermediate frames",
+            df.n_rows - kept.len()
+        );
+    }
     df = df.take_rows(&kept);
-    Ok(df)
+    Ok((df, kept))
 }
 
 /// `next((v for k, v in ext_priority.items() if name.lower().endswith(k)), 9)`

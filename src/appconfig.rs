@@ -73,6 +73,21 @@ impl AppConfig {
                             .into_iter()
                             .map(|item| item.trim().to_string())
                             .collect();
+                        // A6: an override onto a name that is not an
+                        // internal column silently creates a phantom column
+                        // nothing consumes, so the loader says so.
+                        if !crate::constants::KNOWN_OVERRIDE_TARGETS
+                            .contains(&k.to_lowercase().as_str())
+                        {
+                            crate::log_warning!(
+                                "_normalize_overrides",
+                                197,
+                                "[override] target '{k}' does not match any recognized \
+                                 internal column and will have no effect. Check for a \
+                                 typo (did you mean one of: {}?)",
+                                crate::constants::KNOWN_OVERRIDE_TARGETS.join(", ")
+                            );
+                        }
                         (k.clone(), keys)
                     })
                     .collect()
@@ -87,7 +102,17 @@ impl AppConfig {
                 if val.is_empty() || val.eq_ignore_ascii_case("none") {
                     continue; // sentinel: "leave as found"
                 }
-                equipment_overrides.push((normalize_key(k), val.to_string()));
+                let key = normalize_key(k);
+                if !crate::constants::KNOWN_OVERRIDE_TARGETS.contains(&key.to_lowercase().as_str())
+                {
+                    crate::log_warning!(
+                        "_normalize_equipment_overrides",
+                        222,
+                        "[equipmentoverrides] target '{k}' does not match any recognized \
+                         internal column and will have no effect."
+                    );
+                }
+                equipment_overrides.push((key, val.to_string()));
             }
         }
 

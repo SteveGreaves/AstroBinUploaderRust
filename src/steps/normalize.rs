@@ -34,6 +34,7 @@ use crate::steps::{astype_str, cast, promote, python_float, to_numeric};
 use crate::table::{Cell, Column, DType, Table};
 
 pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
+    crate::log_info!("execute", 71, "Initialising headers state");
     let mut df = table.clone();
 
     stage1_hardware_overrides(&mut df, cfg)?;
@@ -44,6 +45,11 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
     let mut df = stage5_master_preference(&mut df)?;
     stage6_normalize_image_type(&mut df);
     stage7_harden(&mut df);
+    crate::log_debug!(
+        "execute",
+        269,
+        "Completed data type conversion and header normalization"
+    );
 
     Ok(df)
 }
@@ -65,14 +71,30 @@ fn stage1_hardware_overrides(df: &mut Table, cfg: &AppConfig) -> Result<()> {
             };
             found.push(source.name.clone());
             combined = Some(match combined {
-                None => source.clone(),
-                Some(acc) => fillna_from(&acc, source).with_context(|| {
+                None => {
+                    crate::log_debug!(
+                        "execute",
+                        91,
+                        "Applying hardware override: Mapped '{}' to internal key '{internal_key}'",
+                        source.name
+                    );
+                    source.clone()
+                }
+                Some(acc) => {
+                    crate::log_debug!(
+                        "execute",
+                        94,
+                        "Applying hardware override: Coalescing '{}' into internal key '{internal_key}'",
+                        source.name
+                    );
+                    fillna_from(&acc, source).with_context(|| {
                     format!(
                         "[override] {internal_key}: coalescing '{}' into the \
                          accumulated value",
                         source.name
                     )
-                })?,
+                })?
+                }
             });
         }
 
@@ -115,6 +137,7 @@ fn fillna_from(a: &Column, b: &Column) -> Result<Column> {
 /// Stage 2 — lower-case every column name, then merge any duplicates the
 /// lower-casing created.
 fn stage2_lowercase_and_coalesce(df: &mut Table) -> Result<()> {
+    crate::log_debug!("execute", 123, "Normalizing all column names to lowercase");
     for c in &mut df.columns {
         c.name = c.name.to_lowercase();
     }
@@ -130,6 +153,7 @@ fn stage2_lowercase_and_coalesce(df: &mut Table) -> Result<()> {
     if !duplicated {
         return Ok(());
     }
+    crate::log_debug!("execute", 128, "Merging duplicate columns");
 
     // `_coalesce_duplicate_columns`: first non-null across each same-named
     // group, left to right, and the surviving columns come out **sorted** --
@@ -168,6 +192,11 @@ fn stage3_defaults(df: &mut Table, cfg: &AppConfig) -> Result<()> {
             continue;
         }
         let scalar = AppConfig::default_scalar(key, value)?;
+        crate::log_debug!(
+            "execute",
+            139,
+            "Default Injection: Key '{key}' not found, using default '{scalar}'"
+        );
         df.set_scalar(&lower, Cell::Str(scalar));
     }
     Ok(())
@@ -177,6 +206,12 @@ fn stage3_defaults(df: &mut Table, cfg: &AppConfig) -> Result<()> {
 /// alike.
 fn stage3b_equipment_overrides(df: &mut Table, cfg: &AppConfig) {
     for (key, value) in &cfg.equipment_overrides {
+        crate::log_debug!(
+            "execute",
+            150,
+            "Equipment Override: forcing '{}' = '{value}'",
+            key.to_lowercase()
+        );
         df.set_scalar(&key.to_lowercase(), Cell::Str(value.clone()));
     }
 }
@@ -189,6 +224,7 @@ fn stage4_initial_filter(mut df: Table) -> Table {
     if !df.has_column(col::IMAGE_TYPE) {
         return df;
     }
+    crate::log_debug!("execute", 158, "Performing initial image type filtering");
     let upper: Vec<String> = df
         .column(col::IMAGE_TYPE)
         .unwrap()
@@ -234,6 +270,16 @@ struct GroupKey {
     tail: String,
 }
 
+impl GroupKey {
+    /// `repr(tuple)` of the key, as the master-preference records print it.
+    fn py_tuple(&self) -> String {
+        format!(
+            "('{}', {}, '{}', '{}', '{}')",
+            self.base_type, self.gain, self.egain, self.binning, self.tail
+        )
+    }
+}
+
 /// Stage 5 — where a calibration group contains a master, keep only the
 /// master.
 ///
@@ -244,6 +290,7 @@ struct GroupKey {
 /// the early return when there are no calibration frames at all, which leaves
 /// row order untouched.
 fn stage5_master_preference(df: &mut Table) -> Result<Table> {
+    crate::log_debug!("execute", 167, "Executing master preference filtering");
     let Some(itype) = df.column(col::IMAGE_TYPE) else {
         bail!("master preference needs an '{}' column", col::IMAGE_TYPE);
     };
@@ -302,16 +349,66 @@ fn stage5_master_preference(df: &mut Table) -> Result<Table> {
                 })
                 .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
             chosen.push(match latest {
-                Some((_, i)) => i,
-                None => masters[0],
+                Some((d, i)) => {
+                    crate::log_debug!(
+                        "_execute_master_preference",
+                        370,
+                        "Master Preference: {} masters found for group {}; kept the \
+                         most recent (DATE-OBS={}).",
+                        masters.len(),
+                        keyed[g].0.py_tuple(),
+                        py_timestamp(d)
+                    );
+                    i
+                }
+                None => {
+                    crate::log_debug!(
+                        "_execute_master_preference",
+                        379,
+                        "Master Preference: {} masters found for group {} but none had \
+                         a usable DATE-OBS; kept the first found under scan order.",
+                        masters.len(),
+                        keyed[g].0.py_tuple()
+                    );
+                    masters[0]
+                }
             });
         }
         g = end;
     }
 
+    // `if dropped_count > 0:` -- how many raw frames a master displaced.
+    let dropped = cals.len() - chosen.len();
+    if dropped > 0 {
+        crate::log_debug!(
+            "_execute_master_preference",
+            393,
+            "Master Preference Filter: Dropped {dropped} redundant raw/duplicate \
+             calibration frames."
+        );
+    }
+
     let mut order = lights;
     order.extend(chosen);
     Ok(df.take_rows(&order))
+}
+
+/// `str(pandas.Timestamp)`: seconds always, microseconds only when non-zero.
+fn py_timestamp(d: (i32, u32, u32, u32, u32, u32, u32)) -> String {
+    let (y, mo, da, h, mi, s, us) = d;
+    let head = format!("{y:04}-{mo:02}-{da:02} {h:02}:{mi:02}:{s:02}");
+    if us == 0 {
+        head
+    } else {
+        format!("{head}.{us:06}")
+    }
+}
+
+/// `row.get(InternalColumns.FILENAME, '<unknown file>')`.
+fn filename_or_unknown(df: &Table, row: usize) -> String {
+    df.column(col::FILENAME)
+        .map(|c| astype_str(&c.cells[row]))
+        .unwrap_or_else(|| "<unknown file>".to_string())
 }
 
 fn group_key(df: &Table, row: usize, itype: &str) -> Result<GroupKey> {
@@ -328,14 +425,34 @@ fn group_key(df: &Table, row: usize, itype: &str) -> Result<GroupKey> {
     // there through `int(nan)`, which is a ValueError.
     let gain = match python_float(cell(col::GAIN)?) {
         Ok(v) if v.is_finite() => v.round_ties_even() as i64,
-        _ => 0,
+        other => {
+            if other.is_err() {
+                crate::log_debug!(
+                    "get_group_key",
+                    306,
+                    "Master preference: unparseable GAIN for {}, using 0 ({})",
+                    filename_or_unknown(df, row),
+                    crate::steps::python_float_error(cell(col::GAIN)?)
+                );
+            }
+            0
+        }
     };
 
     // `f"{float(x):.2f}"`. A NaN formats as "nan" rather than raising, so it
     // is a group key like any other.
     let egain = match python_float(cell(col::EGAIN)?) {
         Ok(v) => format_2f(v),
-        Err(()) => "1.00".to_string(),
+        Err(()) => {
+            crate::log_debug!(
+                "get_group_key",
+                316,
+                "Master preference: unparseable EGAIN for {}, using 1.00 ({})",
+                filename_or_unknown(df, row),
+                crate::steps::python_float_error(cell(col::EGAIN)?)
+            );
+            "1.00".to_string()
+        }
     };
 
     let binning = astype_str(cell(col::BINNING)?).trim().to_string();
@@ -343,7 +460,16 @@ fn group_key(df: &Table, row: usize, itype: &str) -> Result<GroupKey> {
     let tail = if base_type == "DARK" || base_type == "BIAS" {
         match python_float(cell(col::DURATION)?) {
             Ok(v) => format_2f(v),
-            Err(()) => "0.00".to_string(),
+            Err(()) => {
+                crate::log_debug!(
+                    "get_group_key",
+                    335,
+                    "Master preference: unparseable DURATION for {}, using 0.00 ({})",
+                    filename_or_unknown(df, row),
+                    crate::steps::python_float_error(cell(col::DURATION)?)
+                );
+                "0.00".to_string()
+            }
         }
     } else {
         // `row.get('filter', ...)`: a missing column is the default here, not
@@ -431,6 +557,7 @@ fn stage6_normalize_image_type(df: &mut Table) {
     if !df.has_column(col::IMAGE_TYPE) {
         return;
     }
+    crate::log_debug!("execute", 172, "Standardizing image type values");
 
     // `sorted(type_map.items(), key=lambda x: len(x[0]), reverse=True)` --
     // stable, so equal-length keywords keep the dict's insertion order. Spelt
@@ -466,6 +593,15 @@ fn stage6_normalize_image_type(df: &mut Table) {
     let mut out: Vec<Cell> = df.column(col::IMAGE_TYPE).unwrap().cells.clone();
 
     for (keyword, normalized) in TYPE_MAP {
+        // `if mask.any(): logger.debug(...)` -- once per keyword that claims
+        // at least one row, not once per row.
+        if (0..original.len()).any(|i| !assigned[i] && original[i].contains(keyword)) {
+            crate::log_debug!(
+                "execute",
+                210,
+                "Converted IMAGETYP keyword '{keyword}' to {normalized}"
+            );
+        }
         for i in 0..original.len() {
             if !assigned[i] && original[i].contains(keyword) {
                 out[i] = Cell::Str((*normalized).to_string());
@@ -504,6 +640,11 @@ enum Harden {
 
 /// Stage 7 — make sure the core columns exist and carry the expected type.
 fn stage7_harden(df: &mut Table) {
+    crate::log_debug!(
+        "execute",
+        216,
+        "Reducing headers and hardening core column data types"
+    );
     use Harden::*;
     let core: &[(&str, Cell, Harden)] = &[
         (col::GAIN, Cell::Int(0), Gain),

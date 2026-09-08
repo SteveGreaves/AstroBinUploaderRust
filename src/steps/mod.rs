@@ -75,6 +75,17 @@ pub fn to_numeric(cell: &Cell) -> Option<f64> {
 /// `Err` stands for the `ValueError`/`TypeError` those call sites catch. A
 /// null is not an error: a missing cell is `np.nan`, and `float(nan)` is
 /// `nan`.
+/// The `str(e)` of the exception `float(cell)` raises, for the log records
+/// that interpolate it. `python_float` fails on exactly one thing -- a string
+/// that does not parse -- so this is CPython's `ValueError` message, not a
+/// general emulation of it.
+pub fn python_float_error(cell: &Cell) -> String {
+    match cell {
+        Cell::Str(s) => format!("could not convert string to float: '{s}'"),
+        other => format!("float() argument must be a string or a real number, not '{other:?}'"),
+    }
+}
+
 pub fn python_float(cell: &Cell) -> Result<f64, ()> {
     match cell {
         Cell::Null => Ok(f64::NAN),

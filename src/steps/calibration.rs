@@ -30,6 +30,15 @@ use crate::table::{Cell, Column, DType, Table};
 const EGAIN_UNSET_TOLERANCE: f64 = 0.0001;
 
 pub fn execute(table: &Table) -> Result<Table> {
+    let labels: Vec<usize> = (0..table.n_rows).collect();
+    execute_labelled(table, &labels)
+}
+
+/// As `execute`, with each row's pandas index label -- which after
+/// `DeduplicateStep` is no longer the row's position. Only the per-light
+/// debug record needs it.
+pub fn execute_labelled(table: &Table, labels: &[usize]) -> Result<Table> {
+    crate::log_info!("execute", 34, "Starting calibration matching process");
     let mut df = table.clone();
     if df.n_rows == 0 {
         return Ok(df);
@@ -44,6 +53,31 @@ pub fn execute(table: &Table) -> Result<Table> {
             dtype: DType::Str,
             cells: gain_match.iter().map(|s| Cell::Str(s.clone())).collect(),
         },
+    );
+
+    // `Series.unique()` -- first-seen order, not sorted.
+    {
+        let mut seen: Vec<&str> = Vec::new();
+        for k in &gain_match {
+            if !seen.contains(&k.as_str()) {
+                seen.push(k);
+            }
+        }
+        crate::log_debug!(
+            "execute",
+            66,
+            "Calibration Handshake: Identified hybrid matching keys: [{}]",
+            seen
+                .iter()
+                .map(|k| format!("'{k}'"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    crate::log_debug!(
+        "execute",
+        70,
+        "Identifying calibration frame anchors from light frames"
     );
 
     let Some(itype_col) = df.column(col::IMAGE_TYPE) else {
@@ -102,8 +136,16 @@ pub fn execute(table: &Table) -> Result<Table> {
     }
 
     // --- Stage 3/4/5: segment, count, reintegrate --------------------------
+    crate::log_debug!("execute", 114, "Segmenting lights and calibration frames");
     let lights: Vec<usize> = keep.iter().copied().filter(|&i| is_light[i]).collect();
     let cals: Vec<usize> = keep.iter().copied().filter(|&i| !is_light[i]).collect();
+    crate::log_debug!(
+        "execute",
+        119,
+        "Split DataFrame: {} LIGHTS and {} calibration frames",
+        lights.len(),
+        cals.len()
+    );
 
     if lights.is_empty() {
         return Ok(df.take_rows(&keep));
@@ -123,6 +165,12 @@ pub fn execute(table: &Table) -> Result<Table> {
     let dates: Vec<String> = match df.column(col::DATE_OBS) {
         Some(c) => c.cells.iter().map(astype_str).collect(),
         None => vec![String::new(); df.n_rows],
+    };
+
+    crate::log_debug!("execute", 130, "Matching calibration frames to light frames");
+    let filenames: Vec<String> = match df.column(col::FILENAME) {
+        Some(c) => c.cells.iter().map(astype_str).collect(),
+        None => vec!["Unknown".to_string(); df.n_rows],
     };
 
     let mut counts: Vec<[i64; 4]> = vec![[0; 4]; df.n_rows]; // darks, flats, flatDarks, bias
@@ -168,6 +216,17 @@ pub fn execute(table: &Table) -> Result<Table> {
             resolve_count(&flat_darks, &upper, &number, &dates),
             resolve_count(&bias, &upper, &number, &dates),
         ];
+        let [d_count, f_count, fd_count, b_count] = counts[l];
+        if d_count > 0 || b_count > 0 || f_count > 0 || fd_count > 0 {
+            crate::log_debug!(
+                "execute",
+                223,
+                "Light Index {} ({}): Assigned {d_count} Darks, {f_count} Flats, \
+                 {b_count} Bias, {fd_count} FlatDarks.",
+                labels.get(l).copied().unwrap_or(l),
+                filenames[l]
+            );
+        }
     }
 
     // `lights[col] = 0` resets the counters for lights only; the calibration
@@ -201,16 +260,43 @@ pub fn execute(table: &Table) -> Result<Table> {
 /// A NaN EGAIN is not an error — `abs(nan - 1.0) > tol` is simply false — so
 /// it falls through to the gain branch rather than being caught.
 fn hybrid_key(df: &Table, row: usize) -> String {
+    let filename = || -> String {
+        df.column(col::FILENAME)
+            .map(|c| astype_str(&c.cells[row]))
+            .unwrap_or_else(|| "<unknown file>".to_string())
+    };
     if let Some(c) = df.column(col::EGAIN) {
-        if let Ok(egain) = python_float(&c.cells[row]) {
-            if (egain - 1.0).abs() > EGAIN_UNSET_TOLERANCE {
-                return format!("E_{egain:.2}");
+        match python_float(&c.cells[row]) {
+            Ok(egain) => {
+                if (egain - 1.0).abs() > EGAIN_UNSET_TOLERANCE {
+                    return format!("E_{egain:.2}");
+                }
             }
+            Err(()) => crate::log_debug!(
+                "create_hybrid_key",
+                47,
+                "Hybrid gain key: unparseable EGAIN for {}, falling back to GAIN ({})",
+                filename(),
+                crate::steps::python_float_error(&c.cells[row])
+            ),
         }
     }
     match df.column(col::GAIN).map(|c| python_float(&c.cells[row])) {
         Some(Ok(g)) if g.is_finite() => format!("G_{}", g.round_ties_even() as i64),
-        _ => "G_0".to_string(),
+        other => {
+            if let Some(c) = df.column(col::GAIN) {
+                if !matches!(other, Some(Ok(g)) if g.is_finite()) {
+                    crate::log_debug!(
+                        "create_hybrid_key",
+                        57,
+                        "Hybrid gain key: unparseable GAIN for {}, using G_0 ({})",
+                        filename(),
+                        crate::steps::python_float_error(&c.cells[row])
+                    );
+                }
+            }
+            "G_0".to_string()
+        }
     }
 }
 
