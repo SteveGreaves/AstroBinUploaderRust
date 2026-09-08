@@ -76,14 +76,19 @@ pub mod posix {
     /// That is the intended behaviour — it is what the Python writes into
     /// `SOURCE_PATH`.
     pub fn abspath(p: &str) -> String {
-        let joined = if p.starts_with('/') {
-            p.to_string()
-        } else {
-            let cwd = std::env::current_dir()
-                .map(|c| c.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            join(&cwd, p)
-        };
+        let cwd = std::env::current_dir()
+            .map(|c| c.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        abspath_with_cwd(p, &cwd)
+    }
+
+    /// `abspath`'s logic with the current directory supplied rather than
+    /// read from the live process — so the join/normalise rules can be
+    /// tested against a *known* POSIX-shaped cwd on any host, including one
+    /// whose real `current_dir()` is a Windows path (a Windows CI runner,
+    /// say). `abspath` above is the thin wrapper that plugs in the real one.
+    fn abspath_with_cwd(p: &str, cwd: &str) -> String {
+        let joined = if p.starts_with('/') { p.to_string() } else { join(cwd, p) };
         normpath(&joined)
     }
 
@@ -183,7 +188,19 @@ pub mod posix {
         #[test]
         fn abspath_leaves_an_absolute_path_alone_apart_from_normalising() {
             assert_eq!(abspath("/a/b/../c"), "/a/c");
-            assert!(abspath("rel").starts_with('/'));
+        }
+
+        /// `abspath` on a relative path needs a real cwd to prove anything
+        /// about, and the *real* `current_dir()` is a POSIX path only on a
+        /// POSIX host — a Windows CI runner exposed exactly that when this
+        /// test used to call bare `abspath("rel")` and assert the result
+        /// started with `/`. Supplying a synthetic cwd tests the join and
+        /// normalise rules on every host, this crate's own Linux development
+        /// machine included.
+        #[test]
+        fn abspath_joins_a_relative_path_onto_the_given_cwd() {
+            assert_eq!(abspath_with_cwd("rel", "/a/b"), "/a/b/rel");
+            assert_eq!(abspath_with_cwd("../rel", "/a/b"), "/a/rel");
         }
     }
 }
@@ -316,14 +333,20 @@ pub mod windows {
     /// `ntpath.abspath` = `normpath(join(getcwd(), p))`, the same shape as
     /// the POSIX version.
     pub fn abspath(p: &str) -> String {
-        let joined = if isabs(p) {
-            p.to_string()
-        } else {
-            let cwd = std::env::current_dir()
-                .map(|c| c.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            join(&cwd, p)
-        };
+        let cwd = std::env::current_dir()
+            .map(|c| c.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        abspath_with_cwd(p, &cwd)
+    }
+
+    /// `abspath`'s logic with the current directory supplied rather than
+    /// read from the live process — so it can be tested against a *known*
+    /// Windows-shaped cwd on any host, including one whose real
+    /// `current_dir()` is a POSIX path (this crate's own Linux development
+    /// machine). `abspath` above is the thin wrapper that plugs in the real
+    /// one.
+    fn abspath_with_cwd(p: &str, cwd: &str) -> String {
+        let joined = if isabs(p) { p.to_string() } else { join(cwd, p) };
         normpath(&joined)
     }
 
@@ -442,6 +465,16 @@ pub mod windows {
         #[test]
         fn abspath_leaves_an_absolute_path_alone_apart_from_normalising() {
             assert_eq!(abspath(r"C:\a\..\c"), r"C:\c");
+        }
+
+        /// The `windows` counterpart of the `posix` test above: a controlled
+        /// cwd rather than the real one, so the join/normalise rules are
+        /// tested the same way on every host regardless of which OS is
+        /// actually running the test.
+        #[test]
+        fn abspath_joins_a_relative_path_onto_the_given_cwd() {
+            assert_eq!(abspath_with_cwd("rel", r"C:\a\b"), r"C:\a\b\rel");
+            assert_eq!(abspath_with_cwd(r"..\rel", r"C:\a\b"), r"C:\a\rel");
         }
     }
 }
