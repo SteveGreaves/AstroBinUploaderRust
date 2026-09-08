@@ -39,6 +39,17 @@ jobs:
             can_run: true
     runs-on: ${{ matrix.os }}
     steps:
+      # Windows' 260-character MAX_PATH is shorter than some committed
+      # fixture paths (parity/fixtures/binary/xisf_mixed/registered/... has
+      # real WBPP-generated names, and shortening them would mean the corpus
+      # no longer matches what it documents having captured). Git itself
+      # supports long paths past that limit; it just has to be told to, and
+      # that has to happen before checkout, not after -- the clone is where
+      # the limit bites.
+      - name: Enable long paths (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+
       - uses: actions/checkout@v4
 
       - name: Add target
