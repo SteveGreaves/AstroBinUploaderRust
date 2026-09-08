@@ -22,6 +22,10 @@ pub const SITE_LONG: &str = "sitelong";
 pub const BORTLE: &str = "bortle";
 pub const FILENAME: &str = "filename";
 pub const SOURCE_PATH: &str = "source_path";
+/// The *raw* header key the extractor writes, before `NormalizeHeadersStep`
+/// lower-cases it. The scan path never upper-cases column names, so the two
+/// spellings coexist and mixing them up silently loses the column.
+pub const SOURCE_PATH_RAW: &str = "SOURCE_PATH";
 pub const NUMBER: &str = "number";
 pub const DATE_OBS: &str = "date-obs";
 pub const SITE_NAME: &str = "site";

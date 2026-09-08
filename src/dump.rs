@@ -77,6 +77,14 @@ fn escape(s: &str) -> String {
 
 /// Writes one frame in the canonical form, columns in frame order.
 pub fn dump_frame(step_name: &str, table: &Table, out: &mut impl Write) -> std::io::Result<()> {
+    // The column list first, on one line. Column order is load-bearing, and on
+    // the disk-scan path it is decided by first appearance across every file
+    // scanned -- so one unexpected card in the first file shifts every later
+    // column, and a per-column diff would show sixty shifted lines with no
+    // obvious cause. This makes that failure a single short diff.
+    let names: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
+    writeln!(out, "COLS\t{step_name}\t{}", names.join(&SEP.to_string()))?;
+
     for col in &table.columns {
         let rendered: Vec<String> = col.cells.iter().map(canon).collect();
         writeln!(

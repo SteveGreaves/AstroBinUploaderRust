@@ -23,8 +23,17 @@ unambiguous in both languages -- Python's repr and Rust's Display disagree on
 values like 1e20, and that disagreement is not something this dump should be
 testing.
 
+The first argument is either a captured CSV (the `--test` injection point) or
+a **directory**, in which case the frame comes from a real disk scan through
+`extract_from_directories` -- which is what Phase 4's readers have to
+reproduce. The two paths build their frames differently and it matters:
+`extract_from_csv` goes through `read_csv` dtype inference and upper-cases
+every column name, while a scan builds `pd.DataFrame(list_of_dicts)` from
+whatever Python objects astropy and the XISF parser returned, and does not
+touch the names.
+
 Usage:
-    python3 parity/dump_steps.py <fixture.csv> <config.ini> [--step N]
+    python3 parity/dump_steps.py <fixture.csv|directory> <config.ini> [--step N]
 
 Requires the Python project importable; point PYTHONPATH at it or run with
 --python-repo.
@@ -62,6 +71,14 @@ def canon(value, dtype_kind: str) -> str:
 def dump_frame(step_name: str, df, out) -> None:
     import pandas as pd
 
+    # The column list, on its own line, before the columns themselves.
+    # Column order is load-bearing and, on the disk-scan path, is decided by
+    # first appearance across every file in the scan -- so one unexpected card
+    # in the first file shifts every later column and the per-column diff
+    # becomes 60 shifted lines with no obvious cause. This line makes that
+    # failure one short diff instead.
+    print(f"COLS\t{step_name}\t{SEP.join(str(c) for c in df.columns)}", file=out)
+
     for col in df.columns:
         series = df[col]
         kind = series.dtype.kind  # i, f, b, O, M ...
@@ -79,9 +96,25 @@ def dump_frame(step_name: str, df, out) -> None:
         )
 
 
+def extract(extractor, source: str):
+    """The captured-CSV path or the disk-scan path, whichever `source` names.
+
+    `extract_from_directories` writes a progress counter to stdout, which is
+    where the dump goes, so it is redirected to stderr for the duration --
+    otherwise "Scanning files: 1 of 5..." lands in the middle of the frame.
+    """
+    import contextlib
+    import os
+
+    if os.path.isdir(source):
+        with contextlib.redirect_stdout(sys.stderr):
+            return extractor.extract_from_directories([source])
+    return extractor.extract_from_csv(source)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("fixture")
+    ap.add_argument("fixture", help="a captured CSV, or a directory to scan")
     ap.add_argument("config")
     ap.add_argument("--python-repo", default=None,
                     help="path to the AstroBinUploader checkout (default: sibling)")
@@ -111,7 +144,7 @@ def main() -> int:
 
     logger = logging.getLogger("AstroBinV2")
     config = ConfigLoader(logger).load(args.config)
-    raw_df = HeaderExtractor(logger, config).extract_from_csv(args.fixture)
+    raw_df = extract(HeaderExtractor(logger, config), args.fixture)
     state = SessionState(config=config, raw_df=raw_df)
 
     steps = [

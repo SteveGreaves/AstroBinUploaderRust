@@ -7,29 +7,33 @@ frames into the acquisition CSV and session summary AstroBin's bulk importer
 expects.
 
 The goal is a single self-contained binary per platform — Windows, Linux and
-macOS — with no Python, no libcfitsio and no shared-library requirements.
+macOS — with no Python, no libcfitsio and no shared-library requirements. The
+FITS header reader is hand-written for exactly that reason; the whole binary
+depends on `clap`, `anyhow`, `chrono` and `roxmltree`.
 
-## Status: Phase 3 of 6
+## Status: Phase 4 of 6
 
-The pipeline is complete and byte-exact end to end — but only from a captured
-CSV. Reading FITS and XISF files off disk is Phase 4, so a run still needs
-`--test <csv>`. See [`PORT_PLAN.md`](PORT_PLAN.md) for the full plan, the
-parity contract and the ranked hazard list.
+Functionally complete: a directory of FITS/XISF frames in, both artifacts out,
+byte-identical to Python v2.1.1. What remains is speed and packaging.
 
 | Phase | Scope | State |
 |---|---|---|
 | 1 | CLI, config parser, `--test` CSV ingest | **done** |
 | 2 | The six pipeline steps | **done** |
 | 3 | Exporter and report formatting | **done** |
-| 4 | FITS and XISF readers | not started |
+| 4 | FITS and XISF readers | **done** |
 | 5 | Parallelism, release matrix | not started |
 | 6 | Differential harness in CI | not started |
 
 ```sh
-$ astrobin-upload "/data/Sadr Region" --test raw.csv --config config.ini
-# writes Sadr_Region_acquisition.csv and Sadr_Region_session_summary.txt
-# into /data/Sadr Region/AstroBinUploadInfo/
+$ astrobin-upload "/data/Sadr Region"
+# scans recursively, then writes Sadr_Region_acquisition.csv and
+# Sadr_Region_session_summary.txt into
+# /data/Sadr Region/AstroBinUploadInfo/
 ```
+
+See [`PORT_PLAN.md`](PORT_PLAN.md) for the full plan, the parity contract and
+the ranked hazard list.
 
 ## The parity contract
 
@@ -56,6 +60,15 @@ Two Python libraries are reimplemented here rather than substituted:
   renders as `100` or `100.0` in the file AstroBin consumes. `None` is a null
   sentinel, `True`/`False` infer as bool, leading zeros are lost to int64, and
   an integer past i64 stays a string rather than becoming a float.
+- **`pd.DataFrame(list_of_dicts)` inference**, which is a *different* set of
+  rules and is what a disk scan goes through. Here `None` is not a sentinel —
+  it stays the literal string — and a bool column with one missing key becomes
+  `object` rather than `bool`.
+- **astropy's FITS header presentation.** A tile-compressed HDU is reported as
+  the image it decompresses to, not as the BINTABLE on disk, so `XTENSION`
+  reads `IMAGE`, the `Z`-prefixed cards replace the table's geometry, and the
+  compression machinery disappears. The reader reproduces that rather than
+  reporting what is literally in the file.
 
 `parity/check_parity.py` builds the same canonical dump from the real
 libraries and from this binary, then diffs them:
@@ -83,6 +96,11 @@ $ python3 parity/check_reports.py    # the two output artifacts
 [PASS] sadr: both artifacts byte-identical; temperature statistics bit-identical over 1 site(s)
 ...
 4/4 fixture(s) passed.
+
+$ python3 parity/check_readers.py    # the FITS and XISF readers, off real files
+[PASS] Sadr Region: 221 file(s) scanned; 478 lines identical (00_raw, ...); both artifacts match references/sadr_*
+...
+3/3 scenario(s) passed.
 ```
 
 `check_steps.py` compares the live Python pipeline's frames against this
@@ -92,13 +110,16 @@ byte-compares the finished CSV and summary against the committed references,
 and then compares the temperature statistics the summary *rounds away* — a
 green summary says nothing about how a mean was summed, and one of them is
 numpy's pairwise reduction rather than the Kahan sum the rest of the pipeline
-uses.
+uses. `check_readers.py` scans the committed binary fixtures with both
+implementations; the `Sadr Region` scenario is 221 real N.I.N.A. frames and is
+compared against the *same* reference the CSV fixture uses, so the reader is
+checked against a target that existed before it did.
 
 ## Build
 
 ```sh
 cargo build --release      # target/release/astrobin-upload
-cargo test                 # 104 unit tests
+cargo test                 # 123 unit tests
 ```
 
 ## Corpus

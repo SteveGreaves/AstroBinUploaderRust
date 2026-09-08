@@ -14,11 +14,15 @@ mod datetime;
 mod constants;
 mod dump;
 mod exporter;
+mod extractor;
+mod fits;
 mod numeric;
+mod pathutil;
 mod pandas_fmt;
 mod reports;
 mod steps;
 mod table;
+mod xisf;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -61,42 +65,35 @@ fn main() -> Result<()> {
     }
 
     if args.dump_steps {
-        let Some(csv) = args.test.as_deref() else {
-            bail!("--dump-steps needs --test <csv>: disk scanning is Phase 4");
-        };
-        dump_steps(&cfg, csv)?;
+        dump_steps(&cfg, &args)?;
         return Ok(());
     }
 
     if args.dump_report_stats {
-        let Some(csv) = args.test.as_deref() else {
-            bail!("--dump-report-stats needs --test <csv>: disk scanning is Phase 4");
-        };
-        dump_report_stats(&cfg, csv)?;
+        dump_report_stats(&cfg, &args)?;
         return Ok(());
     }
-
-    let Some(csv) = args.test.as_deref() else {
-        bail!("disk scanning is Phase 4; re-run with --test <csv> for now");
-    };
 
     // The output directory lives inside the *resolved* first argument, but
     // the basename the artifacts are named after comes from the raw argument
     // string, before any resolution -- `os.path.basename(args.directory_paths[0])`,
     // not of the abspath'd copy.
-    let first = &args.directory_paths[0];
-    let out_dir = std::fs::canonicalize(first)
-        .with_context(|| format!("resolving {}", first.display()))?
-        .join("AstroBinUploadInfo");
+    let first = args.directory_paths[0].to_string_lossy().into_owned();
+    // `os.path.abspath`, not `canonicalize`: the Python normalises the string
+    // and leaves symlinks alone, and the same rule writes `SOURCE_PATH`, whose
+    // `dirname` is half of DeduplicateStep's group key.
+    let out_dir = std::path::PathBuf::from(pathutil::join(
+        &pathutil::abspath(&first),
+        "AstroBinUploadInfo",
+    ));
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("creating {}", out_dir.display()))?;
 
-    let basename = py_basename(&first.to_string_lossy()).replace(' ', "_");
+    let basename = pathutil::basename(&first).replace(' ', "_");
 
     println!("Output directory: {}", out_dir.display());
 
-    let raw = Table::read_csv_upper(csv)
-        .with_context(|| format!("ingesting {}", csv.display()))?;
+    let raw = load_headers(&args, true)?;
     let app = crate::appconfig::AppConfig::from_config(&cfg)?;
     let agg = run_pipeline(&raw, &app)?;
 
@@ -109,6 +106,30 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// The raw header frame: injected from a CSV, or scanned off disk.
+///
+/// The two build their frames by different rules -- see `extractor.rs`'s
+/// table -- so which one ran is visible in the result, not just in how it got
+/// there.
+fn load_headers(args: &Cli, announce: bool) -> Result<Table> {
+    match args.test.as_deref() {
+        Some(csv) => Table::read_csv_upper(csv)
+            .with_context(|| format!("ingesting {}", csv.display())),
+        None => {
+            if announce {
+                // Not in the dump paths: their output *is* stdout.
+                println!("\nReading FITS headers...\n");
+            }
+            let paths: Vec<String> = args
+                .directory_paths
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            extractor::extract_from_directories(&paths)
+        }
+    }
+}
+
 /// The six steps, in the order `PipelineProcessor` runs them.
 fn run_pipeline(raw: &Table, app: &crate::appconfig::AppConfig) -> Result<Table> {
     let df = steps::normalize::execute(raw, app)?;
@@ -119,22 +140,10 @@ fn run_pipeline(raw: &Table, app: &crate::appconfig::AppConfig) -> Result<Table>
     steps::aggregate::execute(&df, app)
 }
 
-/// `os.path.basename` on POSIX: everything after the last `/`, and nothing
-/// else. `Path::file_name` is not a substitute -- it answers `Some("b")` for
-/// `/a/b/` where Python answers `""`, and `None` for `.` where Python answers
-/// `"."`. The result names every output file, so the two must agree.
-fn py_basename(p: &str) -> &str {
-    match p.rfind('/') {
-        Some(i) => &p[i + 1..],
-        None => p,
-    }
-}
-
 /// The summary's temperature statistics, one line per site, as raw IEEE-754
 /// bits — the same little-endian hex `dump.rs` uses for float cells.
-fn dump_report_stats(cfg: &ConfigFile, csv: &std::path::Path) -> Result<()> {
-    let raw = Table::read_csv_upper(csv)
-        .with_context(|| format!("ingesting {}", csv.display()))?;
+fn dump_report_stats(cfg: &ConfigFile, args: &Cli) -> Result<()> {
+    let raw = load_headers(args, false)?;
     let app = crate::appconfig::AppConfig::from_config(cfg)?;
     let agg = run_pipeline(&raw, &app)?;
     for (site, st) in reports::report_temp_stats(&agg) {
@@ -216,11 +225,10 @@ fn dump_parity(cfg: &ConfigFile, test_csv: Option<&std::path::Path>) -> Result<(
 /// Emits `00_raw` first, then one block per implemented step, so a mismatch
 /// localises to the first step that diverges. Steps not yet ported simply do
 /// not appear -- the diff is taken over the prefix both sides emit.
-fn dump_steps(cfg: &ConfigFile, csv: &std::path::Path) -> Result<()> {
+fn dump_steps(cfg: &ConfigFile, args: &Cli) -> Result<()> {
     use std::io::Write;
 
-    let raw = Table::read_csv_upper(csv)
-        .with_context(|| format!("ingesting {}", csv.display()))?;
+    let raw = load_headers(args, false)?;
     let app = crate::appconfig::AppConfig::from_config(cfg)?;
 
     let stdout = std::io::stdout();

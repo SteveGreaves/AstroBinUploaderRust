@@ -25,6 +25,41 @@ rules *measured* against pandas 2.2.3). `parity/check_parity.py`: 3/3.
 Python oracle on both fixtures: 465 lines (sadr) and 450 lines (sh2101_calib), every
 column, every cell, column order and row order included. `python3 parity/check_steps.py`.
 
+**Phase 4 — complete, 2026-09-08.** The FITS and XISF readers. The binary now runs
+from **real files on disk**: `astrobin-upload <dir> --config <ini>` scans, and a scan of
+`parity/fixtures/binary/Sadr Region` (221 real N.I.N.A. FITS) produces both artifacts
+byte-identical to the committed `sadr` reference — the same reference the CSV fixture
+uses, so the reader was checked against a target that existed before it did. Verify with
+`python3 parity/check_readers.py`: 3/3 scenarios, every pipeline step cell-identical and
+both artifacts matching.
+
+- `src/pathutil.rs` — `os.path` POSIX semantics. `abspath` normalises the string and
+  leaves symlinks alone, unlike `canonicalize`; `SOURCE_PATH` is an abspath and its
+  `dirname` is half of the dedup key, so the difference reaches output.
+- `src/extractor.rs` — traversal (hazard 8), the quote-strip, and `Table::from_records`.
+- `src/fits.rs` — hand-written header reader, no cfitsio. HDU selection, card typing,
+  and astropy's compressed-header translation.
+- `src/xisf.rs` — the XML header block and its four fallbacks.
+- `parity/check_readers.py` — the Phase 4 harness.
+
+**Three things worth keeping:**
+
+1. **`pd.DataFrame(list_of_dicts)` inference is not `read_csv` inference**, and the
+   scan path uses the first. Measured table in `Table::from_records`' doc comment. The
+   one that bites: `"None"` stays the literal string on a scan, where `read_csv` makes
+   it NA — so `[defaults]`' `None` survives a scan but not a `--test` replay. Also
+   `bool` + a missing key → `object`, and the scan path never upper-cases column names.
+2. **astropy synthesises a header for a compressed HDU** rather than reporting the
+   BINTABLE on disk: `XTENSION` becomes `IMAGE`, the `Z`-prefixed cards replace the
+   table's geometry, and the whole compression machinery — `EXTNAME` included —
+   disappears. The frame's columns are whatever astropy returned, so `fits.rs` performs
+   the same substitution. None of it reaches the artifacts; all of it decides the raw
+   frame's column set.
+3. **Column order on a scan is first appearance across every file scanned**, so one
+   unexpected card in the first file shifts every column after it. Both dumps now emit
+   a `COLS` line per step so that failure is one short diff rather than sixty shifted
+   ones.
+
 **Phase 3 — complete, 2026-09-08.** The exporter and `reports.py`. Both artifacts —
 `<basename>_acquisition.csv` and `<basename>_session_summary.txt` — are byte-identical
 to the committed references on both fixtures, and the statistics the summary rounds
@@ -63,12 +98,18 @@ are live in this codebase (hazard 3) and `exporter::tests` pins the distinction.
 
 ## 🚧 Current Blockers & Technical Debt
 
-- **Nothing blocking.** Builds clean with no warnings, 104 tests pass, all three parity
-  harnesses green over all four fixtures (`check_parity.py` 5/5, `check_steps.py` 4/4,
-  `check_reports.py` 4/4).
-- New dependency: **`chrono`** (`clock` feature only), for the `Generated <timestamp>`
-  line in local time. Chosen over `libc::localtime_r` because Phase 5's release matrix
-  includes Windows, where that function does not exist.
+- **Nothing blocking.** Builds clean with no warnings, 123 tests pass, all four parity
+  harnesses green (`check_parity.py` 5/5, `check_steps.py` 4/4, `check_reports.py` 4/4,
+  `check_readers.py` 3/3).
+- Dependencies: **`chrono`** (`clock` feature only) for the `Generated <timestamp>` line
+  in local time — chosen over `libc::localtime_r` because Phase 5's release matrix
+  includes Windows, where that function does not exist — and **`roxmltree`** for the
+  XISF XML block. The FITS reader is hand-written and depends on nothing.
+- `fits.rs` does **not** implement `CONTINUE` long-string cards or `HIERARCH` keywords.
+  Measured across all 227 FITS files in the corpus, the only non-value cards are `END`,
+  blank padding, `HISTORY` and `COMMENT`. An undefined-value card (`KEY = / comment`)
+  becomes an empty string where astropy carries an `Undefined` sentinel; no card in the
+  corpus is undefined, and that is the one place a divergence could hide.
 - `check_steps.py` and `check_reports.py` verify their own oracle before running: the
   sibling Python checkout must be at v2.1.1 and the committed corpus copies must still
   match its `golden_tests/`. `ASTROBIN_PY_REPO` / `ASTROBIN_PYTHON` override the paths.
@@ -92,11 +133,11 @@ are live in this codebase (hazard 3) and `exporter::tests` pins the distinction.
   `Preselected/Calibration data/24th February 2022/FlatWizard/`, but they need a
   same-era lights set to pair with), a **multi-site session** — the site loop has never
   run twice — and a **blank filter in a flat table**.
-- `main.rs::py_basename` is POSIX-only: it splits on `/` alone, matching
-  `posixpath.basename`. On Windows, Python would use `ntpath.basename` and split on
-  `\` and the drive letter too, so `C:\data\Sadr --test ...` would name its outputs
-  differently under the two implementations. Harmless until Phase 5 ships Windows
-  binaries; fix it there.
+- `src/pathutil.rs` is POSIX-only by design — it is a transcription of `posixpath`, and
+  every expectation in its tests was checked against the real module. On Windows, Python
+  would use `ntpath`, which splits on `\` and the drive letter too, so paths would be
+  handled differently under the two implementations. Harmless until Phase 5 ships
+  Windows binaries; fix it there, in one file.
 - **The binary corpus now exists** at `parity/fixtures/binary/` (241 files, 2.4 MiB of
   content), built by the committed `parity/make_binary_fixtures.py` and
   `parity/make_synthetic_fits.py`. Every real file is a header-only truncation, which
@@ -120,14 +161,25 @@ are live in this codebase (hazard 3) and `exporter::tests` pins the distinction.
 
 ## 🚀 Next Steps
 
-**Phase 4: the FITS and XISF readers** — the only part the CSV fixtures cannot
-exercise, and the first task is building the fixture corpus it will be tested against.
-`PORT_PLAN.md`'s FITS section (hand-write it, do not bind cfitsio) and hazard 8
-(traversal order: `file_paths.sort()` over the `os.path.join(root, file)` strings
-*exactly as constructed from the CLI arguments*, not canonicalised) are the two to read
-first. `main.rs` currently bails when `--test` is absent; that is the seam Phase 4 fills.
+**Phase 5: `rayon` parallelism and the release matrix.** The port is now functionally
+complete — every phase of the pipeline, from a directory of FITS/XISF files to both
+artifacts, is byte-identical to Python v2.1.1. What is left is speed and packaging.
 
-The method that carried Phases 2 and 3 transfers again:
+Two things to know before starting Phase 5:
+
+- **`extract_from_directories` is the only place worth parallelising**, and it is
+  already shaped for it: `scan_directories` produces the sorted path list, then each
+  file is read independently. The Python uses a `ProcessPoolExecutor` and reassembles
+  results *in the sorted dispatch order* rather than completion order; a `rayon`
+  `par_iter().map(...)` over the sorted list preserves order by construction, so the
+  hazard the Python had to work around does not arise. Row order is the whole ballgame
+  (hazard 8) — `check_readers.py` catches any regression.
+- **`pathutil.rs` is POSIX-only**, and the Windows targets in the release matrix need
+  `ntpath` semantics. That is the one file to fix.
+
+Then Phase 6 (differential harness in CI).
+
+The method that carried Phases 2 to 4 transfers again:
 
 1. **Get the oracle emitting the target before writing any logic**, then diff.
 2. **Add one unit at a time and diff after each**, so every diff has one candidate cause.
@@ -136,15 +188,16 @@ The method that carried Phases 2 and 3 transfers again:
 4. **Where the artifact rounds a value away, compare the value too.** The
    `--dump-report-stats` flag exists because a green summary diff says nothing about
    how a mean was summed; without it the pairwise transcription would be unverified.
-
-Then Phase 5 (rayon, release matrix) and Phase 6 (differential harness in CI).
+5. **Measure the library, do not reason about it.** Every surprise in Phases 3 and 4 —
+   the `to_string` header space, the trim loop, `pd.DataFrame(records)` inference,
+   astropy's compressed-header synthesis, the `.fz` exclusion — came from running the
+   Python and reading the answer, and several contradicted what the plan assumed.
 
 ## 📂 Files to Load
 
-- `PORT_PLAN.md` — plan of record. Phase 4 touches the FITS section and hazard 8.
-- `parity/check_steps.py` and `parity/check_reports.py` — run both first to confirm
-  the starting state is green.
-- `src/main.rs` — `run_pipeline` and the `--test`-only guard Phase 4 replaces.
-- `src/table.rs` — the frame Phase 4's readers must produce (`extract_from_directories`
-  builds the same shape `extract_from_csv` does).
-- Upstream, read alongside: `../AstroBinUploader/engine/extractor.py`.
+- `PORT_PLAN.md` — plan of record. Phase 5 is the release matrix and `rayon`.
+- The four harnesses — run all of them first to confirm the starting state is green:
+  `check_parity.py`, `check_steps.py`, `check_reports.py`, `check_readers.py`.
+- `src/extractor.rs` — `scan_directories` is the seam Phase 5 parallelises.
+- `src/pathutil.rs` — POSIX-only; the Windows targets need `ntpath` semantics.
+- `Cargo.toml` — the release profile the matrix builds on.

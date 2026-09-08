@@ -105,14 +105,7 @@ fn ext_rank(name: &str) -> u32 {
         .map_or(9, |(_, rank)| *rank)
 }
 
-/// `os.path.dirname` for the POSIX paths the extractor writes.
-fn dirname(path: &str) -> String {
-    match path.rfind('/') {
-        None => String::new(),
-        Some(0) => "/".to_string(),
-        Some(i) => path[..i].to_string(),
-    }
-}
+use crate::pathutil::dirname;
 
 /// `RegexPatterns.WBPP_FILENAME`, group 1:
 ///
