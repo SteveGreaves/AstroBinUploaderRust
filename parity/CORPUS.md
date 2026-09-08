@@ -99,8 +99,8 @@ but it never reaches either artifact, so the references are portable.
 
 ### The synthetic cases, and one measured surprise
 
-`PORT_PLAN.md` asked for "a tile-compressed `.fits.fz` case". Measured, that is
-two different cases, and the plan's phrasing picks the less useful one:
+The port plan asked for "a tile-compressed `.fits.fz` case". Measured, that is
+two different cases, and that phrasing picks the less useful one:
 
 - The traversal filter is `('.fits', '.fit', '.fts', '.xisf')`
   (`extractor.py:88`), so a file actually **named** `.fits.fz` is silently
@@ -156,4 +156,4 @@ It predates remediation A2 and therefore carries no `SOURCE_PATH` column,
 which makes it the only fixture exercising the *degraded* filename-only
 deduplication branch (and its warning). `sh2101_calib_raw.csv` exercises the
 normal `(directory, basename)` path. Regenerating sadr would silently drop
-half that coverage. See `PORT_PLAN.md` hazard 13.
+half that coverage. See the port plan's hazard 13.

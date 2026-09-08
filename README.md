@@ -13,7 +13,7 @@ depends on `clap`, `anyhow`, `chrono` and `roxmltree`.
 
 ## Status: complete (6 of 6)
 
-Functionally complete and released for five platforms: a directory of
+Functionally complete: a directory of
 FITS/XISF frames in, both artifacts out, byte-identical to Python v2.1.2, with
 `rayon` parallelism on the disk scan, a CI-verified build for Linux (`musl`,
 static), Windows (x86-64 and arm64) and macOS (x86-64 and arm64), and a
@@ -36,8 +36,10 @@ $ astrobin-upload "/data/Sadr Region"
 # /data/Sadr Region/AstroBinUploadInfo/
 ```
 
-See [`PORT_PLAN.md`](PORT_PLAN.md) for the full plan, the parity contract and
-the ranked hazard list.
+The port was driven by a written plan with a ranked hazard list (fourteen
+places where Python's behaviour is not what a straight reading suggests). That
+plan is a development working document and is kept outside this repository;
+the parity contract it defines is described below.
 
 ## The parity contract
 
@@ -50,7 +52,7 @@ Byte-for-byte parity with a pandas program is the whole difficulty of this
 port, and most of it lives in two places: the `DataFrame.to_string()` table
 appended to the session summary, and the many small pandas semantics the
 pipeline leans on — rounding mode, group-key ordering, null propagation,
-`agg('first')` vs `.iloc[0]`. `PORT_PLAN.md` ranks all fourteen.
+`agg('first')` vs `.iloc[0]`. The port plan ranks all fourteen.
 
 ## Emulated libraries are checked, not assumed
 
@@ -109,12 +111,17 @@ $ python3 parity/check_readers.py    # the FITS and XISF readers, off real files
 
 ## Releases
 
-```sh
-gh workflow run release-matrix.yml
-```
+Pushing a `v*` tag builds all five targets, packages each one, and publishes a
+GitHub release with the five archives attached. `gh workflow run
+release-matrix.yml` runs the same build without publishing anything.
 
-builds and (where the runner's own CPU can execute the result) tests all five
-targets: `x86_64-unknown-linux-musl` (fully static), `x86_64-pc-windows-msvc`,
+An archive holds only what a user needs to run the program: the executable,
+`packaging/config.ini.example`, `packaging/README.md` and `LICENSE`. The
+parity corpus, the harnesses and the development notes stay in the repository
+and are never shipped.
+
+The matrix builds and (where the runner's own CPU can execute the result)
+tests all five targets: `x86_64-unknown-linux-musl` (fully static), `x86_64-pc-windows-msvc`,
 `aarch64-pc-windows-msvc`, `x86_64-apple-darwin`, `aarch64-apple-darwin`. No
 target needs a C toolchain of its own beyond musl's final link step — the
 whole point of hand-writing the FITS reader instead of binding cfitsio.
@@ -126,7 +133,7 @@ scripts on every push to `main` — the live Python oracle and this port, side
 by side, on GitHub's own runners. Report-only: a divergence shows as a failed
 step, not a failed build, since this repo has no PR workflow yet for a
 blocking check to gate. Meant to retire once there has been a release to
-overlap with (`PORT_PLAN.md` decision 4), not stay forever.
+overlap with, not stay forever.
 
 `check_steps.py` compares the live Python pipeline's frames against this
 binary's, in a canonical form that survives the trip (floats as raw IEEE-754

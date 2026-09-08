@@ -82,20 +82,51 @@ fn main() -> Result<()> {
     // `os.path.abspath`, not `canonicalize`: the Python normalises the string
     // and leaves symlinks alone, and the same rule writes `SOURCE_PATH`, whose
     // `dirname` is half of DeduplicateStep's group key.
-    let out_dir = std::path::PathBuf::from(pathutil::join(
-        &pathutil::abspath(&first),
-        "AstroBinUploadInfo",
-    ));
+    let out_dir_str = pathutil::join(&pathutil::abspath(&first), "AstroBinUploadInfo");
+    let out_dir = std::path::PathBuf::from(&out_dir_str);
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("creating {}", out_dir.display()))?;
 
     let basename = pathutil::basename(&first).replace(' ', "_");
 
     println!("Output directory: {}", out_dir.display());
+    // The "legacy-compliant console boot sequence" main() prints verbatim.
+    // `utils version` names a module that has not existed since v2.0 and
+    // still reports the application's own version; it is echoed rather than
+    // corrected, because stdout is part of what parity means here.
+    println!("Logging initialized.");
+    println!("main version: {}", env!("CARGO_PKG_VERSION"));
+    println!("utils version: {}", env!("CARGO_PKG_VERSION"));
 
     let raw = load_headers(&args, true)?;
+
+    // Written only on the scan path: the export sits in the `else` branch of
+    // `if args.test`, so an injected run -- which was fed one of these files
+    // in the first place -- does not rewrite it.
+    if args.debug && args.test.is_none() && raw.n_rows > 0 {
+        let path = pathutil::join(&out_dir_str, "debug_step_00_RawHeaders.csv");
+        std::fs::write(&path, exporter::to_csv(&raw))
+            .with_context(|| format!("writing {path}"))?;
+    }
+
     let app = crate::appconfig::AppConfig::from_config(&cfg)?;
-    let agg = run_pipeline(&raw, &app)?;
+    let agg = match run_pipeline(&raw, &app, Some(out_dir_str.as_str()), args.debug) {
+        Ok(agg) => agg,
+        Err(e) => {
+            // main()'s final safety net. The dump is deliberately non-fatal
+            // -- it runs while the program is already dying and must never
+            // itself raise -- and `--test` is not excluded here, unlike the
+            // step-00 export above.
+            if raw.n_rows > 0 {
+                let path = pathutil::join(&out_dir_str, "emergency_raw_dump.csv");
+                match std::fs::write(&path, exporter::to_csv(&raw)) {
+                    Ok(()) => println!("Emergency data dump saved to: {path}"),
+                    Err(err) => eprintln!("Emergency data dump also failed: {err}"),
+                }
+            }
+            return Err(e);
+        }
+    };
 
     let now = local_timestamp();
     if let Some(summary) = exporter::export(&agg, raw.n_rows, &basename, &out_dir, &now)? {
@@ -112,14 +143,16 @@ fn main() -> Result<()> {
 /// table -- so which one ran is visible in the result, not just in how it got
 /// there.
 fn load_headers(args: &Cli, announce: bool) -> Result<Table> {
+    if announce {
+        // Printed before the `if args.test` branch on the Python side, so an
+        // injected run announces the read it is not doing too. Suppressed in
+        // the dump paths: their output *is* stdout.
+        println!("\nReading FITS headers...\n");
+    }
     match args.test.as_deref() {
         Some(csv) => Table::read_csv_upper(csv)
             .with_context(|| format!("ingesting {}", csv.display())),
         None => {
-            if announce {
-                // Not in the dump paths: their output *is* stdout.
-                println!("\nReading FITS headers...\n");
-            }
             let paths: Vec<String> = args
                 .directory_paths
                 .iter()
@@ -131,13 +164,82 @@ fn load_headers(args: &Cli, announce: bool) -> Result<Table> {
 }
 
 /// The six steps, in the order `PipelineProcessor` runs them.
-fn run_pipeline(raw: &Table, app: &crate::appconfig::AppConfig) -> Result<Table> {
-    let df = steps::normalize::execute(raw, app)?;
-    let df = steps::optical::execute(&df, app)?;
-    let df = steps::deduplicate::execute(&df)?;
-    let df = steps::calibration::execute(&df)?;
-    let df = steps::geocode::execute(&df, app)?;
-    steps::aggregate::execute(&df, app)
+///
+/// `out_dir` and `debug` mirror `PipelineProcessor.run(debug=..., output_dir=...)`:
+/// with `--debug`, each step's result is written to
+/// `debug_step_NN_<StepName>.csv`; on a failure the state the failing step was
+/// *handed* is written to `..._CRASH_DIAGNOSTIC.csv` whether or not `--debug`
+/// was given, because `state = step.execute(state)` never assigns when
+/// `execute` raises. The names are the Python *class* names -- that is what
+/// `_dump_debug_csv` interpolates (`step.__class__.__name__`), and the
+/// filenames are what `--test` consumes afterwards.
+fn run_pipeline(
+    raw: &Table,
+    app: &crate::appconfig::AppConfig,
+    out_dir: Option<&str>,
+    debug: bool,
+) -> Result<Table> {
+    // `_dump_debug_csv`'s own three-way priority: the aggregated frame at the
+    // aggregation step, else the processed frame, else -- at step 1 only --
+    // the raw frame. When every candidate is empty it writes nothing at all,
+    // rather than a header-only file.
+    let dump = |i: usize, name: &str, suffix: &str, candidates: &[&Table]| {
+        let Some(dir) = out_dir else { return };
+        let Some(t) = debug_dump_target(candidates) else { return };
+        let path = pathutil::join(dir, &format!("debug_step_{i:02}_{name}{suffix}.csv"));
+        // `_dump_debug_csv` swallows its own failures ("Failed to save debug
+        // CSV for {step}") rather than killing a run that was otherwise fine.
+        if let Err(e) = std::fs::write(&path, exporter::to_csv(t)) {
+            eprintln!("Failed to save debug CSV for {name}: {e}");
+        }
+    };
+
+    macro_rules! step {
+        ($i:expr, $name:expr, $input:expr, $call:expr) => {
+            match $call {
+                Ok(out) => {
+                    if debug {
+                        dump($i, $name, "", &[&out]);
+                    }
+                    out
+                }
+                Err(e) => {
+                    dump($i, $name, "_CRASH_DIAGNOSTIC", &[$input, raw]);
+                    return Err(e);
+                }
+            }
+        };
+    }
+
+    let df = step!(1, "NormalizeHeadersStep", raw, steps::normalize::execute(raw, app));
+    let df = step!(2, "OpticalParameterStep", &df, steps::optical::execute(&df, app));
+    let df = step!(3, "DeduplicateStep", &df, steps::deduplicate::execute(&df));
+    let df = step!(4, "CalibrationMatcherStep", &df, steps::calibration::execute(&df));
+    let df = step!(5, "GeocodeStep", &df, steps::geocode::execute(&df, app));
+
+    // The aggregation step is the one place the dump prefers a different
+    // frame: `aggregated_df` when it has rows, falling back to the frame that
+    // went in when it does not.
+    match steps::aggregate::execute(&df, app) {
+        Ok(agg) => {
+            if debug {
+                dump(6, "AggregationStep", "", &[&agg, &df]);
+            }
+            Ok(agg)
+        }
+        Err(e) => {
+            dump(6, "AggregationStep", "_CRASH_DIAGNOSTIC", &[&df, raw]);
+            Err(e)
+        }
+    }
+}
+
+/// `_dump_debug_csv`'s frame choice: the first candidate that has rows, in
+/// the priority order the caller lists them, and `None` when every one is
+/// empty -- Python falls off the end of its `if`/`elif` chain there and
+/// writes no file at all, rather than a header-only one.
+fn debug_dump_target<'a>(candidates: &[&'a Table]) -> Option<&'a Table> {
+    candidates.iter().copied().find(|t| t.n_rows > 0)
 }
 
 /// The summary's temperature statistics, one line per site, as raw IEEE-754
@@ -145,7 +247,7 @@ fn run_pipeline(raw: &Table, app: &crate::appconfig::AppConfig) -> Result<Table>
 fn dump_report_stats(cfg: &ConfigFile, args: &Cli) -> Result<()> {
     let raw = load_headers(args, false)?;
     let app = crate::appconfig::AppConfig::from_config(cfg)?;
-    let agg = run_pipeline(&raw, &app)?;
+    let agg = run_pipeline(&raw, &app, None, false)?;
     for (site, st) in reports::report_temp_stats(&agg) {
         println!(
             "SITE\t{site}\t{}\t{}\t{}\t{}",
@@ -257,4 +359,32 @@ fn dump_steps(cfg: &ConfigFile, args: &Cli) -> Result<()> {
 
     out.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn table(n_rows: usize) -> Table {
+        Table {
+            columns: Vec::new(),
+            n_rows,
+        }
+    }
+
+    /// `_dump_debug_csv`'s `if`/`elif` chain, including the branch nothing in
+    /// the corpus reaches: when every candidate frame is empty it writes no
+    /// file, so an empty run leaves no `debug_step_NN_*.csv` behind rather
+    /// than a file holding only a header row.
+    #[test]
+    fn the_debug_dump_takes_the_first_non_empty_frame_and_none_when_all_are_empty() {
+        let full = table(3);
+        let other = table(7);
+        let empty = table(0);
+
+        assert_eq!(debug_dump_target(&[&full, &other]).unwrap().n_rows, 3);
+        assert_eq!(debug_dump_target(&[&empty, &other]).unwrap().n_rows, 7);
+        assert!(debug_dump_target(&[&empty, &empty]).is_none());
+        assert!(debug_dump_target(&[]).is_none());
+    }
 }

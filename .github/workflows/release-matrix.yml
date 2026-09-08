@@ -76,12 +76,66 @@ jobs:
         if: matrix.can_run
         run: cargo test --release --target ${{ matrix.target }}
 
+      # What a user needs to run the program, and nothing else: the
+      # executable, a configuration to start from (the binary refuses to run
+      # without a config.ini and will not invent one), the licence GPL-3.0
+      # requires travel with a binary, and usage documentation. Development
+      # material -- the parity corpus, the harnesses, the port plan -- stays
+      # in the repository and out of what is shipped.
+      - name: Stage package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          set -eu
+          dir="astrobin-upload-${{ matrix.target }}"
+          mkdir "$dir"
+          cp "target/${{ matrix.target }}/release/astrobin-upload" "$dir/"
+          cp packaging/config.ini.example packaging/README.md LICENSE "$dir/"
+          tar -czf "$dir.tar.gz" "$dir"
+
+      - name: Stage package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = "astrobin-upload-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $dir | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/astrobin-upload.exe" $dir
+          Copy-Item packaging/config.ini.example, packaging/README.md, LICENSE $dir
+          Compress-Archive -Path $dir -DestinationPath "$dir.zip"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: astrobin-upload-${{ matrix.target }}
           path: |
-            target/${{ matrix.target }}/release/astrobin-upload
-            target/${{ matrix.target }}/release/astrobin-upload.exe
+            astrobin-upload-${{ matrix.target }}.tar.gz
+            astrobin-upload-${{ matrix.target }}.zip
           if-no-files-found: error
           retention-days: 14
+
+  # Tags only. `workflow_dispatch` builds the matrix for checking; it must not
+  # cut a release as a side effect.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # No `name:`, so all five artifacts download into per-artifact
+      # subdirectories; each holds exactly one archive.
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          path: packages
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          find packages -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            $(find packages -type f \( -name '*.tar.gz' -o -name '*.zip' \) | sort)

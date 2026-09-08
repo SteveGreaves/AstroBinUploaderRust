@@ -4,3 +4,8 @@
 .vscode/
 __pycache__/
 config.ini
+
+# Development working notes -- kept local, not repo content
+SESSION.md
+SESSION.old.md
+PORT_PLAN.md
