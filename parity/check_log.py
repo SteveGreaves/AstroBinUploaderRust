@@ -26,12 +26,14 @@ Usage:
     cargo build --release && python3 parity/check_log.py
 """
 
+import http.server
 import pathlib
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 
 import os
 
@@ -43,6 +45,8 @@ PYTHON = os.environ.get(
     "ASTROBIN_PYTHON", "/mnt/raid0/Code/venvs/.astrovenv/bin/python3"
 )
 CONFIG = REPO_ROOT / "parity" / "golden_config.ini"
+LOOKUP_CONFIG = REPO_ROOT / "parity" / "lookup_config.ini"
+STUB_API_KEY = "ABCDEF1234567890"
 
 
 def _rust_bin() -> pathlib.Path:
@@ -144,6 +148,91 @@ def scenario_scan(tmp: pathlib.Path, corpus: pathlib.Path) -> tuple[list[str], l
     return logs[0], logs[1]
 
 
+class _StubSkyQualityHandler(http.server.BaseHTTPRequestHandler):
+    """Answers every GET with a fixed World Atlas brightness value.
+
+    Stands in for lightpollutionmap.info: both `get_bortle_sqm` (Python) and
+    `sites::get_bortle_sqm` (Rust) send a GET with `key=` in the query
+    string, and neither checks anything about the response beyond parsing
+    the body as a float, so a fixed 200 with "0.1" drives the same
+    conversion path a real success would.
+    """
+
+    def do_GET(self):  # noqa: N802 -- http.server's naming
+        body = b"0.1"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):  # silence -- this is a test fixture
+        pass
+
+
+def _start_stub_server() -> tuple[http.server.HTTPServer, str]:
+    """A background HTTP server on an ephemeral loopback port.
+
+    Started once and shared by both sides' subprocesses within one
+    scenario run: it never distinguishes callers, and neither log records
+    the port number on a successful lookup (only a *failed* request's
+    message would carry the URL, which the redaction fix -- upstream
+    v2.2.1 / this port -- exists to keep out of the log regardless).
+    """
+    server = http.server.HTTPServer(("127.0.0.1", 0), _StubSkyQualityHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    endpoint = f"http://127.0.0.1:{server.server_port}/"
+    return server, endpoint
+
+
+def scenario_lookup(tmp: pathlib.Path, corpus: pathlib.Path) -> tuple[list[str], list[str]]:
+    """Drives `sites.py` / `sites.rs`'s log records through a local stub.
+
+    Reaches: `resolve` (347/348/349/380), `get_bortle_sqm`
+    (178/179/180/204/215), and `sqm_to_bortle` (76) -- six records, verified
+    by running this scenario, not assumed from reading the source.
+
+    Does **not** reach, and an earlier draft of this docstring wrongly
+    claimed it did:
+
+    - `save` (430/434) and the `[sites]` write-back it performs. No
+      `EMAIL_ADDRESS` means `reverse_geocode` is never called, so the
+      resolved site name falls back to `[defaults] SITE` -- and `save`'s own
+      first guard (correctly) refuses to write the default-named site back
+      under its own name. Confirmed by inspecting `config.ini` after the run
+      on both sides: `[sites]` stays empty on both, and the log has no
+      "Saved new site" line. Reaching `save` needs a site name that came
+      from a real resolution, which needs reverse geocoding to succeed.
+    - `reverse_geocode`'s own records (258/270/272/281) or `resolve`'s
+      "neither could be resolved" (365) / "sky quality unavailable" (374)
+      branches. Nominatim's domain is hardcoded on both sides, not
+      config-driven, so it cannot be redirected at a local stub without
+      changing code that would then differ from what ships.
+
+    See PORT_PLAN.md's Phase 7 notes for what stays covered only by the
+    live run against the real APIs.
+    """
+    server, endpoint = _start_stub_server()
+    try:
+        logs = []
+        for side, cmd in (
+            ("py", [PYTHON, str(PY_REPO / "AstroBinUpload.py")]),
+            ("rs", [str(RUST_BIN)]),
+        ):
+            root = tmp / f"lookup_{side}"
+            root.mkdir(parents=True)
+            shutil.copytree(corpus, root / corpus.name)
+            cfg_text = LOOKUP_CONFIG.read_text(encoding="utf-8")
+            cfg_text = cfg_text.replace("ENDPOINT_PLACEHOLDER", endpoint)
+            (root / "config.ini").write_text(cfg_text, encoding="utf-8")
+            run(cmd + [corpus.name, "--debug"], cwd=root)
+            logs.append(read_log(root, corpus.name))
+        return logs[0], logs[1]
+    finally:
+        server.shutdown()
+
+
 def main() -> int:
     if not RUST_BIN.exists():
         sys.exit(f"{RUST_BIN} not built -- run `cargo build` first")
@@ -165,6 +254,11 @@ def main() -> int:
             sub.mkdir()
             py, rs = scenario_scan(sub, corpus)
             failures += not compare(f"scan {corpus.name}", py, rs)
+
+            sub = tmp / "lookup"
+            sub.mkdir()
+            py, rs = scenario_lookup(sub, corpus)
+            failures += not compare(f"lookup {corpus.name}", py, rs)
 
     print()
     if failures:
