@@ -52,6 +52,71 @@ python3 AstroBinUpload.py "<scratch>/LBN 548" "/mnt/raid0/AstroImaging/Source/LB
 — an empty scratch directory as the *first* argument so the output basename is
 `LBN_548` and nothing is written into the image tree.
 
+## `ic405`, captured for this port (2026-09-09)
+
+Closes the `DARKFLAT` gap the section below used to record. Same rules as the
+two fixtures above -- no upstream counterpart, listed in `LOCAL_FIXTURES` -- but
+blessed against live Python **v2.1.2**, the current parity target.
+
+| Fixture | Rows | Source directory | What it adds |
+|---|---|---|---|
+| `ic405` | 1365 | `/mnt/raid0/AstroImaging/Preselected/Flaming Star Nebula (IC405) started 4th February 2022` | The only fixture with `IMAGETYP = 'DARKFLAT'` frames (765 LIGHT, 350 FLAT, 250 DARKFLAT), so the only one whose `flatDarks` column is non-zero and whose summary emits a `DARKFLATS:` section and a `Total DARKFLAT Exposure Time` line. Also the only fixture where `GeocodeStep` forms **two** clusters. Has `SOURCE_PATH`, so like `lbn548` it takes the normal `(directory, basename)` dedup branch. |
+
+### The two-cluster geocode, and why the report still says one site
+
+Traced through the step dumps, not inferred. In
+`debug_step_00_RawHeaders.csv`, 602 of the 1365 frames carry no `SITELAT` at
+all: all 350 FLATs, all 250 DARKFLATs, and **two LIGHTs**. Then, in order:
+
+1. `base.py:225` -- Stage 7, "Core Column Hardening", inside
+   `NormalizeHeadersStep` -- fills missing `SITELAT`/`SITELONG` with `0.0`.
+   By `debug_step_01` nothing is null any more and the column has gained a
+   seventh distinct value.
+2. `GeocodeStep._align_coordinates` (`geocode.py:186`) exists to give
+   calibration frames a light frame's coordinates, but it decides via
+   `pd.isna()`. Nothing is NA by then, so the "Direct fallback" branch never
+   fires and every calibration frame takes the geodesic-match branch instead.
+3. That branch assigns each frame the coordinates of the **nearest** LIGHT.
+   Two LIGHTs now sit at `0, 0`, so for a frame already at `0, 0` the nearest
+   light is one of those two, at distance zero. All 600 calibration frames are
+   "aligned" onto `0, 0`. The loop iterates over non-LIGHT rows only, so the two
+   zero-filled lights are never repaired either.
+
+`0, 0` is some 5800 km outside `CLUSTER_RADIUS_M = 110.0` metres of Papworth
+Everard, so the greedy single-linkage pass produces two clusters,
+`(52.248426, -0.123102)` and `(0.0, 0.0)` -- visible in
+`debug_step_05_GeocodeStep.csv`. Both resolve to the same site *name* through
+the database lookup, and the report groups by name, which is why
+`ic405_summary.txt` prints one `Site:` block and `check_reports.py` reports
+`1 site(s)`. Its `Latitude: 0.0000` / `Longitude: 0.0000` is not a capture
+error; it is what live Python v2.1.2 emits for this data, and the port
+reproduces it byte for byte. Whether Python *should* emit it is an upstream
+question, not a parity one.
+
+This is *not* the missing multi-site fixture: the report's per-site loop still
+runs exactly once. See "Not yet covered by any fixture" below.
+
+### How it was captured and blessed
+
+```sh
+# 1. the fixture -- an empty scratch directory first, so nothing is written
+#    into the image tree
+python3 AstroBinUpload.py "<scratch>/ic405" \
+        "/mnt/raid0/AstroImaging/Preselected/Flaming Star Nebula (IC405) started 4th February 2022" \
+        --debug --config parity/golden_config.ini
+cp "<scratch>/ic405/AstroBinUploadInfo/debug_step_00_RawHeaders.csv" \
+   parity/fixtures/ic405_raw.csv
+
+# 2. the references -- a --test replay of that fixture, in a scratch directory
+#    named for the original so the basename in the summary matches
+python3 AstroBinUpload.py "<scratch>/Flaming Star Nebula (IC405) started 4th February 2022" \
+        --test ".../raw.csv" --config parity/golden_config.ini
+```
+
+The replay reproduces the disk scan exactly: the acquisition CSVs are identical
+and the summaries differ only in the `Generated` line and the embedded CSV name,
+which is what the `ic405.basename` sidecar exists to control.
+
 ## Removed on 2026-09-08
 
 Four reference pairs were deleted. None had a replayable fixture, so nothing
@@ -142,13 +207,57 @@ label was already `MASTERxxx` correctly before and after.
 
 ## Not yet covered by any fixture
 
-- **`DARKFLAT` / `MASTERDARKFLATS`.** 200 darkflat frames exist at
-  `/mnt/raid0/AstroImaging/Preselected/Calibration data/24th February 2022/FlatWizard/`,
-  but they need a lights set from the same era and gain to match; the 2025–26
-  datasets will not pair with them.
-- **A multi-site session.** Every fixture reports exactly one site, so the
-  `for site, site_group in df.groupby(...)` loop has never run twice.
-- **A blank filter in a flat table** (`'No Filter'` / `'None'`).
+Measured on 2026-09-09 by scanning the **whole** of `/mnt/raid0/AstroImaging`
+with the port -- all 43,073 FITS and XISF files, header-only, 5m44s -- and
+querying the resulting `debug_step_00_RawHeaders.csv`. An earlier pass that
+sampled one FITS file per directory was not good enough: half the library is
+XISF-only, and it produced a coordinate span (60 m) that the full census
+contradicts (167.7 m). The negatives below are as much a result as the fixture
+that closed `DARKFLAT`; each is a search that does not need repeating here.
+
+- **`MASTERDARKFLATS`.** Raw `DARKFLAT` is covered by `ic405` as of 2026-09-09.
+  A *master* darkflat is not, and cannot be: no file matching `*master*darkflat*`
+  or `*master*flatdark*` exists anywhere in the library, and
+  `Preselected/Calibration data/masters/` holds only `masterDark`, eight
+  `masterFlat`s and a `superbias`.
+
+- **A multi-site session**, meaning a run where `reports.py:361`'s
+  `df.groupby(SITE_NAME)` loop iterates more than once. Two facts, both
+  measured, and the second is the binding one:
+
+  1. Multiple *clusters* are easy. 35,462 frames carry coordinates, in 71
+     unique pairs, spanning 167.7 m -- more than `CLUSTER_RADIUS_M = 110.0`.
+     Scanning the whole library produces **three** clusters:
+     `(52.248430, -0.123145)`, `(0.0, 0.0)`, and `(52.247583, -0.124583)`.
+  2. Clusters are not sites. The name comes from `_find_site_in_db`'s fuzzy
+     match against `[sites]` in `golden_config.ini`, which holds exactly one
+     reachable UK entry (`Norton Close, ...` at `52.2484, -0.1232`); every
+     cluster that misses it falls back to the same `[defaults] SITE =
+     Papworth Everard`. So all three clusters above carry one name, and the
+     summary prints one `Site:` block.
+
+  Two distinct names therefore needs one cluster matching the DB entry *and*
+  another falling to the default. That was not reachable from any natural
+  combination of directories: `LBN 548` alone matches the DB, but adding a
+  second dataset shifts cluster 0's centroid off `-0.1232` (the centroid is
+  the mean of the cluster's *unique* coordinate pairs), and adding a
+  calibration-only tree adds nothing to it because `_align_coordinates` pulls
+  those frames onto the nearest light. The third cluster above is **one single
+  frame** in `Flaming Star Nebula Mosaic` -- a GPS outlier, not a second
+  observing site. Hunting a directory combination that lands cluster 0 on the
+  right side of the rounding boundary would be constructing the result, not
+  finding it, so it was not done. This gap needs frames from a genuinely
+  different observatory, or a second `[sites]` entry with data to match it.
+
+- **A blank filter in a flat table.** Closed as unobtainable, decisively. Of
+  17,482 flat-type frames in the library, **zero** lack a `FILTER` header, and
+  no `'No Filter'` or `'None'` value appears anywhere: the nine distinct values
+  are `Blue`, `CLS`, `Green`, `Ha`, `Lum`, `Lum (UV-IR Block)`, `OIII`, `Red`,
+  `SII`. A missing `FILTER` occurs only on `DARK`, `BIAS`, `Master Dark` and
+  `Master Bias` -- filter-independent types, where `base.py:231` supplies
+  `'No Filter'` and `xisf_mixed` already covers the resulting blank rows. So
+  what remains uncovered is only the blank-filter *flat*, and the data for it
+  does not exist here.
 
 ## Do not regenerate `fixtures/sadr_raw.csv`
 

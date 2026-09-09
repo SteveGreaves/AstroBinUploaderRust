@@ -42,6 +42,7 @@ UPSTREAM_FIXTURES = [
 LOCAL_FIXTURES = [
     ("mosaic", HERE / "fixtures" / "mosaic_raw.csv"),
     ("lbn548", HERE / "fixtures" / "lbn548_raw.csv"),
+    ("ic405", HERE / "fixtures" / "ic405_raw.csv"),
 ]
 FIXTURES = UPSTREAM_FIXTURES + LOCAL_FIXTURES
 CONFIG = HERE / "golden_config.ini"
