@@ -38,6 +38,17 @@ enum Rule {
     First,
 }
 
+/// Whether `s` is the literal text of a plain (optionally signed) integer --
+/// pandas' `pd.to_numeric` tries an int64 parse before a float64 one for an
+/// object column, and a column stays int64 only when *every* value's text
+/// shape qualifies. `"20"` and `"-5"` qualify; `"20.0"`, `"1e2"`, `""` and
+/// whitespace-only strings do not.
+fn is_integer_literal(s: &str) -> bool {
+    let t = s.trim();
+    let digits = t.strip_prefix(['+', '-']).unwrap_or(t);
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
 pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
     crate::log_info!("execute", 45, "Aggregating parameters...");
     if table.n_rows == 0 {
@@ -227,6 +238,27 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
 
     // `to_numeric(...).fillna(0.0)` on the columns about to be averaged. An
     // int64 column stays int64 -- it has no nulls to fill.
+    //
+    // Most of these are already `DType::Float` by this point: Stage 7
+    // hardening (normalize.rs) force-casts SENSOR_COOLING/SITE_LAT/
+    // SITE_LONG/F_NUMBER/BORTLE/MEAN_SQM/EGAIN unconditionally. `TEMPERATURE`
+    // is the deliberate exception -- its Stage 7 mode is `AsFound`, matching
+    // base.py's own explicit-cast list, which also omits it -- so it can
+    // still be `DType::Str` here, holding whatever Stage 3 default-injected
+    // (the *raw configobj string*, e.g. `"20"` for `[defaults] FOCTEMP = 20`)
+    // for every row of a group with no FOCTEMP header at all -- a real
+    // calibration-master session, not a fixture. `darks`/`flats`/`flatDarks`/
+    // `bias` can reach here as `Str` too, from the same kind of fallback.
+    //
+    // On a `Str` column, `pd.to_numeric` infers int64 rather than float64
+    // when *every* value's own text is integer-shaped and parses cleanly --
+    // not when the parsed value merely happens to be whole (`"20.0"` still
+    // becomes float64, `"20"` becomes int64). Reproduced here rather than
+    // flattened to Float unconditionally, which is what this loop did before
+    // being measured against a real all-masters session: SESSION.md and
+    // PORT_PLAN.md both record that hazard-1-class per-column dtype
+    // inference is exactly the class of bug that hides until real,
+    // untypical data exercises it.
     for name in [
         col::SENSOR_COOLING,
         col::MEAN_FWHM,
@@ -246,19 +278,40 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
         if c.dtype == DType::Int && !c.cells.iter().any(|v| v.is_null()) {
             continue;
         }
-        let cells = c
-            .cells
-            .iter()
-            .map(|v| Cell::Float(to_numeric(v).unwrap_or(0.0)))
-            .collect();
-        df.set_column(
-            name,
-            Column {
-                name: name.to_string(),
-                dtype: DType::Float,
-                cells,
-            },
-        );
+        let all_int_shaped = c.dtype == DType::Str
+            && c.cells.iter().all(|v| match v {
+                Cell::Str(s) => is_integer_literal(s),
+                _ => false,
+            });
+        let (dtype, cells) = if all_int_shaped {
+            let cells = c
+                .cells
+                .iter()
+                .map(|v| match v {
+                    // Every cell already passed `is_integer_literal`, so this
+                    // always succeeds; `i64::MAX`-overflow is the one case
+                    // pandas itself would also fall back to float64 for, and
+                    // is not a shape this program's own defaults produce.
+                    Cell::Str(s) => Cell::Int(s.trim().parse::<i64>().unwrap_or(0)),
+                    // `all_int_shaped`'s own `.all()` guard already excludes
+                    // any non-`Str` cell (its `_ => false` arm), so this is
+                    // unreachable given the code above -- but a `dtype ==
+                    // Str` column holding a non-`Str` cell is not an
+                    // invariant this module can prove from here, so this
+                    // stays a safe fallback rather than a panic.
+                    _ => Cell::Int(0),
+                })
+                .collect();
+            (DType::Int, cells)
+        } else {
+            let cells = c
+                .cells
+                .iter()
+                .map(|v| Cell::Float(to_numeric(v).unwrap_or(0.0)))
+                .collect();
+            (DType::Float, cells)
+        };
+        df.set_column(name, Column { name: name.to_string(), dtype, cells });
     }
 
     // Groups come out sorted by the key tuple, each column compared by its own
@@ -493,6 +546,20 @@ mod tests {
         AppConfig::from_config(&ConfigFile::parse_str(text).unwrap()).unwrap()
     }
 
+    #[test]
+    fn integer_literal_shape_matches_pandas_int64_inference() {
+        assert!(is_integer_literal("20"));
+        assert!(is_integer_literal("-5"));
+        assert!(is_integer_literal("+5"));
+        assert!(is_integer_literal("  20  ")); // to_numeric trims first
+        assert!(!is_integer_literal("20.0"));
+        assert!(!is_integer_literal("1e2"));
+        assert!(!is_integer_literal(""));
+        assert!(!is_integer_literal("   "));
+        assert!(!is_integer_literal("-"));
+        assert!(!is_integer_literal("abc"));
+    }
+
     /// A frame with every column the rules need, one row per line of `rows`.
     fn frame(rows: &[&str]) -> Table {
         let header = "site,imagetyp,filter,gain,xbinning,exposure,object,date-obs,number,\
@@ -563,6 +630,71 @@ mod tests {
         assert_eq!(out.column("darks").unwrap().cells[0], Cell::Int(10));
         assert_eq!(out.column("sessions").unwrap().cells[0], Cell::Int(1));
         assert_eq!(out.column("num_days").unwrap().cells[0], Cell::Int(2));
+    }
+
+    /// Found on real data (a live directory scan, not a fixture): a
+    /// calibration-master session where every frame is missing the FOCTEMP
+    /// header entirely, with `[defaults] FOCTEMP` *configured*. Upstream of
+    /// `aggregate::execute` (normalize.rs's Stage 3, not exercised by this
+    /// module's own tests, which build the post-normalisation table by
+    /// hand), that leaves `foctemp` holding the *raw configobj string*
+    /// `"20"` for every row -- `_normalize_defaults` never coerces types --
+    /// so this test sets the column up the same way directly, matching
+    /// exactly what `aggregate::execute` actually receives on real data
+    /// rather than routing through Stage 3 itself.
+    ///
+    /// pandas' `pd.to_numeric` on an all-`"20"` object column infers int64,
+    /// not float64 -- Python writes `temp_min = 20`, not `20.0`. The first
+    /// version of this cast forced `DType::Float` unconditionally whenever
+    /// the source wasn't already `DType::Int`, which happened to be every
+    /// case any fixture exercised until this one, from a real directory.
+    #[test]
+    fn temperature_stays_integer_when_every_value_is_the_configured_default() {
+        let mut input = frame(&[A, B]);
+        input.set_column(
+            "foctemp",
+            Column {
+                name: "foctemp".into(),
+                dtype: DType::Str,
+                cells: vec![Cell::Str("20".into()); input.n_rows],
+            },
+        );
+        let out = execute(
+            &input,
+            &cfg("[defaults]\nUSEOBSDATE = False\n[filters]\nHa = 4663\n"),
+        )
+        .unwrap();
+        assert_eq!(out.column("temp_min").unwrap().cells[0], Cell::Int(20));
+        assert_eq!(out.column("temp_max").unwrap().cells[0], Cell::Int(20));
+        assert_eq!(out.column("temp_min").unwrap().dtype, DType::Int);
+        // The `foctemp` output column itself comes from Rule::Mean, which
+        // always produces float64 (matching pandas' `.mean()`, whatever the
+        // source dtype) -- unlike temp_min/temp_max's Rule::Min/Max, which
+        // inherit the source column's dtype and are what this test is for.
+        assert_eq!(out.column("foctemp").unwrap().cells[0], Cell::Float(20.0));
+    }
+
+    /// The companion case: a raw config string that *does* carry a decimal
+    /// (`"12.5"`) is not integer-shaped, so the column -- and therefore
+    /// temp_min/temp_max -- stays float64, matching pandas exactly.
+    #[test]
+    fn temperature_stays_float_when_the_configured_default_has_a_decimal() {
+        let mut input = frame(&[A, B]);
+        input.set_column(
+            "foctemp",
+            Column {
+                name: "foctemp".into(),
+                dtype: DType::Str,
+                cells: vec![Cell::Str("12.5".into()); input.n_rows],
+            },
+        );
+        let out = execute(
+            &input,
+            &cfg("[defaults]\nUSEOBSDATE = False\n[filters]\nHa = 4663\n"),
+        )
+        .unwrap();
+        assert_eq!(out.column("temp_min").unwrap().cells[0], Cell::Float(12.5));
+        assert_eq!(out.column("temp_max").unwrap().cells[0], Cell::Float(12.5));
     }
 
     #[test]
