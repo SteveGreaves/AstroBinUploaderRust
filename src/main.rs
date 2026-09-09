@@ -10,6 +10,7 @@
 mod appconfig;
 mod cli;
 mod config;
+mod config_write;
 mod logging;
 mod datetime;
 mod constants;
