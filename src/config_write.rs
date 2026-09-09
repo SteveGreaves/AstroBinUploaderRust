@@ -169,10 +169,8 @@ EMAIL_ADDRESS = your_email@example.com
 ///
 /// Mirrors `ConfigLoader.load`'s no-config branch. The caller is
 /// responsible for the "created; please edit and re-run" message and
-/// `exit(0)` — that CLI wiring is Phase 7C, not this module.
-///
-/// `#[allow(dead_code)]`: not called yet, same reason as `save_site` below.
-#[allow(dead_code)]
+/// `exit(0)` — wired in `main.rs`'s Step-0 bootstrap and `load_config`
+/// (Phase 7C).
 pub fn write_default_config(path: &Path) -> Result<()> {
     std::fs::write(path, GENERATED_DEFAULT_CONFIG)
         .with_context(|| format!("writing generated config to {}", path.display()))

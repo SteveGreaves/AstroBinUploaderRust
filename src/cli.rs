@@ -16,6 +16,7 @@ use std::path::PathBuf;
     long_about = None,
     after_help = "\
 Example Usage:
+  astrobin-upload                                     (first run: creates config.ini)
   astrobin-upload /path/to/my/images
   astrobin-upload /path/to/my/images /path/to/my/calibrationfiles
   astrobin-upload /images /calibration_dir --debug
@@ -23,8 +24,9 @@ Example Usage:
 )]
 pub struct Cli {
     /// One or more directory paths to recursively scan for FITS (.fits, .fit,
-    /// .fts) or XISF (.xisf) files.
-    #[arg(required = true, num_args = 1..)]
+    /// .fts) or XISF (.xisf) files. Omit them entirely on a first run to
+    /// generate a default config.ini.
+    #[arg(num_args = 0..)]
     pub directory_paths: Vec<PathBuf>,
 
     /// Diagnostic Mode: instead of scanning disk, inject metadata from a
@@ -100,9 +102,18 @@ mod tests {
     }
 
     #[test]
-    fn multiple_directories_are_accepted_and_at_least_one_is_required() {
+    fn multiple_directories_are_accepted() {
         let cli = Cli::try_parse_from(["astrobin-upload", "/lights", "/cal"]).unwrap();
         assert_eq!(cli.directory_paths.len(), 2);
-        assert!(Cli::try_parse_from(["astrobin-upload"]).is_err());
+    }
+
+    #[test]
+    fn zero_directories_is_valid_at_the_parser_level() {
+        // `nargs='*'` on the Python side: an empty positional list is a
+        // parse success, not a clap error. What zero paths *means* --
+        // generate a config, or refuse -- is main()'s Step 0 bootstrap, not
+        // the parser's job.
+        let cli = Cli::try_parse_from(["astrobin-upload"]).unwrap();
+        assert!(cli.directory_paths.is_empty());
     }
 }
