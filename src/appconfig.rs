@@ -33,6 +33,21 @@ pub struct AppConfig {
     pub filters: Vec<(String, Value)>,
     /// `[sites]`: site name -> its subsection.
     pub sites: Vec<(String, Section)>,
+    /// `[secret]`: the sky-quality API key/endpoint and contact e-mail --
+    /// `YOUR_API_KEY = <endpoint>` plus `EMAIL_ADDRESS = <address>`, in
+    /// file order, flat like `[filters]` (no key normalisation: `loader.py`
+    /// only lower-cases *top-level* section names, never a section's own
+    /// keys). Empty when the section is absent, which is how the network
+    /// layer (Phase 7E) knows to stay offline -- exactly `models.py`'s
+    /// `secret: Dict[str, Any] = field(default_factory=dict)`.
+    ///
+    /// `#[allow(dead_code)]`: parsed but not yet read by anything --
+    /// `SiteLookup`'s port (Phase 7E) is the first consumer. Exercised in
+    /// the meantime by this module's own tests and by `dump_parity`, which
+    /// walks the raw `ConfigFile` (not `AppConfig`) and so already surfaces
+    /// `[secret]` for `check_parity.py`.
+    #[allow(dead_code)]
+    pub secret: Vec<(String, Value)>,
     pub use_obs_date: bool,
     /// Decimal precision for coordinate rounding. `AppConfig.precision` in
     /// `models.py`; not configurable there either.
@@ -121,6 +136,11 @@ impl AppConfig {
             .map(|s| s.iter_ordered().map(|(k, v)| (k.clone(), v.clone())).collect())
             .unwrap_or_default();
 
+        let secret = cfg
+            .section("secret")
+            .map(|s| s.iter_ordered().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default();
+
         // configobj preserves subsection order; `Section::sections` is a
         // BTreeMap, so recover file order from the parse instead of trusting
         // the map's ordering. Site lookup is by name, not position, so this is
@@ -141,6 +161,7 @@ impl AppConfig {
             equipment_overrides,
             filters,
             sites,
+            secret,
             use_obs_date,
             precision: 4,
         })
@@ -248,5 +269,40 @@ mod tests {
         let c = cfg("[defaults]\nHFR = 1\n");
         assert_eq!(c.default_f64("HFR", 1.0).unwrap(), 1.0);
         assert_eq!(c.default_f64("MISSING", 1.0).unwrap(), 1.0);
+    }
+
+    /// `[secret]` is flat and unnormalised, like `[filters]`: the API key is
+    /// a *key* of the section (loader.py's own comment in engine/sites.py),
+    /// not a value, so key case and spelling must survive untouched for
+    /// `SiteLookup`'s port to recognise it later.
+    #[test]
+    fn secret_is_parsed_flat_and_unnormalised_in_file_order() {
+        let c = cfg(
+            "[secret]\n\
+             YOUR_API_KEY = https://www.lightpollutionmap.info/QueryRaster/\n\
+             EMAIL_ADDRESS = astronomer@example.com\n",
+        );
+        assert_eq!(
+            c.secret,
+            vec![
+                (
+                    "YOUR_API_KEY".to_string(),
+                    Value::Str("https://www.lightpollutionmap.info/QueryRaster/".to_string())
+                ),
+                (
+                    "EMAIL_ADDRESS".to_string(),
+                    Value::Str("astronomer@example.com".to_string())
+                ),
+            ]
+        );
+    }
+
+    /// `models.py`'s `secret: Dict[str, Any] = field(default_factory=dict)`
+    /// -- absent section, empty collection, not an error. This is how the
+    /// network layer (Phase 7E) knows to stay fully offline.
+    #[test]
+    fn secret_is_empty_when_the_section_is_absent() {
+        let c = cfg("[defaults]\nSITE = x\n");
+        assert!(c.secret.is_empty());
     }
 }
