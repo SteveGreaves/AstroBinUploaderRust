@@ -1,0 +1,111 @@
+Observation session summary
+Generated 2026-09-09 07:57:33
+ Target: IC 405
+
+Site: Papworth Everard
+	Latitude: 0.0000°
+	Longitude: 0.0000°
+	Bortle scale: 4.0
+	SQM: 21.00 mag/arcsec²
+
+Equipment used:
+	Telescope           : NP101is
+	Camera              : ZWO ASI6200MM Pro
+	Filterwheel         : Starlight Xpress Fil
+	Focuser             : FocusLynx Focuser 1
+	Capture software    : N.I.N.A. 2.0.0.2055
+	                    : N.I.N.A. 2.0.0.2054
+	                    : N.I.N.A. 2.0.0.2053
+	                    : N.I.N.A. 2.0.0.2051
+	                    : N.I.N.A. 2.0.0.2050
+	                    : N.I.N.A. 2.0.0.2049
+	                    : N.I.N.A. 2.0.0.2048
+	                    : N.I.N.A. 2.0.0.2044
+	                    : N.I.N.A. 2.0.0.2043
+
+
+Observation period:
+	Start date               : 2022-02-04
+	End date                 : 2022-03-26
+	Days                     : 51
+	Observation sessions     : 19
+	Min temperature          : -3.4°C
+	Max temperature          : 10.0°C
+	Mean temperature         : 3.1°C
+
+
+ LIGHTS:
+ Target: IC 405
+
+ Filter   Frames   Gain     Egain        Mean FWHM    Sensor Temp  Mean Temp    Exposure        Total Exposure 
+ Blue     62       0        0.78 e/ADU   2.87 arcsec  -9.9°C       0.9°C        300.00 secs          5 hrs     10 mins   0.00 secs
+ Green    65       0        0.78 e/ADU   2.87 arcsec  -10.0°C      4.6°C        300.00 secs          5 hrs     25 mins   0.00 secs
+ Ha       198      100      0.25 e/ADU   2.87 arcsec  0.6°C        1.9°C        300.00 secs         16 hrs     30 mins   0.00 secs
+ Lum      125      0        0.78 e/ADU   2.87 arcsec  -10.0°C      3.2°C        300.00 secs         10 hrs     25 mins   0.00 secs
+ OIII     122      100      0.25 e/ADU   2.87 arcsec  -10.0°C      2.3°C        300.00 secs         10 hrs     10 mins   0.00 secs
+ Red      64       0        0.78 e/ADU   2.87 arcsec  -10.0°C      5.9°C        300.00 secs          5 hrs     20 mins   0.00 secs
+ SII      129      100      0.25 e/ADU   2.87 arcsec  -10.0°C      3.2°C        300.00 secs         10 hrs     45 mins   0.00 secs
+
+ Exposure time for IC 405: 63 hrs 45 mins 0.00 secs
+
+
+Total LIGHT Exposure Time: 63 hrs 45 mins 0.00 secs
+
+
+ FLATS:
+
+ Filter     Frames   Gain       Egain           Exposure     Total Exposure 
+ Blue       50       0          0.78 e/ADU      1.44 secs         0 hrs      1 mins  12.00 secs
+ Green      50       0          0.78 e/ADU      1.30 secs         0 hrs      1 mins   5.00 secs
+ Ha         50       100        0.25 e/ADU      5.87 secs         0 hrs      4 mins  53.50 secs
+ Lum        50       0          0.78 e/ADU      0.27 secs         0 hrs      0 mins  13.50 secs
+ OIII       50       100        0.25 e/ADU      6.94 secs         0 hrs      5 mins  47.00 secs
+ Red        50       0          0.78 e/ADU      0.95 secs         0 hrs      0 mins  47.50 secs
+ SII        50       100        0.25 e/ADU      5.36 secs         0 hrs      4 mins  28.00 secs
+
+Total FLAT Exposure Time: 0 hrs 18 mins 26.50 secs
+
+
+ DARKFLATS:
+
+ Filter     Frames   Gain       Egain           Exposure     Total Exposure 
+ Blue       50       100        0.25 e/ADU      0.12 secs         0 hrs      0 mins   6.00 secs
+ Green      50       100        0.25 e/ADU      0.10 secs         0 hrs      0 mins   5.00 secs
+ Ha         50       100        0.25 e/ADU      0.85 secs         0 hrs      0 mins  42.50 secs
+ Lum        50       0          0.78 e/ADU      0.09 secs         0 hrs      0 mins   4.50 secs
+ Red        50       100        0.25 e/ADU      0.08 secs         0 hrs      0 mins   4.00 secs
+
+Total DARKFLAT Exposure Time: 0 hrs 1 mins 2.00 secs
+
+
+ Total number of images processed: 1365
+
+Flaming_Star_Nebula_(IC405)_started_4th_February_2022_acquisition.csv
+
+       date filter  number  duration  binning  gain  sensorCooling  fNumber  darks  flats  flatDarks  bias  bortle  meanSqm  meanFwhm  temperature
+ 2022-02-04   2906      49     300.0      1.0     0          -10.0      5.4      0     50         50     0     4.0     21.0      2.87         0.57
+ 2022-02-06   2906      52     300.0      1.0     0          -10.0      5.4      0     50         50     0     4.0     21.0      2.87         1.99
+ 2022-02-07   2906      24     300.0      1.0     0          -10.0      5.4      0     50         50     0     4.0     21.0      2.87         7.11
+ 2022-02-07   4649       3     300.0      1.0     0          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         7.13
+ 2022-02-08   4643       5     300.0      1.0     0          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         6.36
+ 2022-02-08   4649      31     300.0      1.0     0          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         6.86
+ 2022-02-22   4643      30     300.0      1.0     0          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         2.09
+ 2022-02-22   4649      30     300.0      1.0     0          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         3.79
+ 2022-02-23   4643      30     300.0      1.0     0          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         5.21
+ 2022-02-24   4637      43     300.0      1.0     0          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         0.72
+ 2022-02-25   4637      19     300.0      1.0     0          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         1.12
+ 2022-02-25   4663      43     300.0      1.0   100          -10.0      5.4      0     50         50     0     4.0     21.0      2.87        -0.27
+ 2022-02-26   4663      61     300.0      1.0   100          -10.0      5.4      0     50         50     0     4.0     21.0      2.87         1.07
+ 2022-02-27   4663      20     300.0      1.0   100          -10.0      5.4      0     50         50     0     4.0     21.0      2.87         1.82
+ 2022-02-27   4752      36     300.0      1.0   100          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         0.31
+ 2022-03-07   4752      49     300.0      1.0   100          -10.0      5.4      0     50          0     0     4.0     21.0      2.87        -1.99
+ 2022-03-17   4752       5     300.0      1.0   100          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         4.02
+ 2022-03-18   4752      19     300.0      1.0   100          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         4.90
+ 2022-03-18   4844       8     300.0      1.0   100          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         4.20
+ 2022-03-19   4752      13     300.0      1.0   100          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         4.46
+ 2022-03-19   4844      36     300.0      1.0   100          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         2.42
+ 2022-03-20   4844      29     300.0      1.0   100          -10.0      5.4      0     50          0     0     4.0     21.0      2.87        -1.20
+ 2022-03-21   4844      11     300.0      1.0   100          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         5.05
+ 2022-03-22   4844      45     300.0      1.0   100          -10.0      5.4      0     50          0     0     4.0     21.0      2.87         5.76
+ 2022-03-25   4663      34     300.0      1.0   100           16.0      5.4      0     50         50     0     4.0     21.0      2.87         5.54
+ 2022-03-26   4663      40     300.0      1.0   100           16.0      5.4      0     50         50     0     4.0     21.0      2.87         1.35
