@@ -1,4 +1,4 @@
-# AstroBin Upload Utility v2.1.3 — Rust edition
+# AstroBin Upload Utility v2.2.1 — Rust edition
 
 A single self-contained executable that processes FITS/XISF headers and creates
 the AstroBin data acquisition file and summary text. No Python, no libcfitsio,
@@ -8,11 +8,12 @@ Usage:
 `astrobin-upload [directory_paths] [--config config_file]`
 
 This is a port of [AstroBinUploader](https://github.com/SteveGreaves/AstroBinUploader)
-and its output is byte-for-byte identical to that utility at v2.1.3 — the same
-CSV, the same summary, to the last digit and trailing space. Everything this
-document says about *what the program does* therefore applies to both; the
-sections that differ are installation, how you call it, and the handful of
-deliberate differences listed under
+and its output is byte-for-byte identical to that utility at v2.2.0 — the same
+CSV, the same summary, to the last digit and trailing space, including its
+restored online site lookup. Everything this document says about *what the
+program does* therefore applies to both; the sections that differ are
+installation, how you call it, and the handful of deliberate differences
+listed under
 [Differences from the Python utility](#differences-from-the-python-utility).
 
 ## **Contents**
@@ -25,7 +26,7 @@ deliberate differences listed under
     - [Config.ini contents and editing](#configini-contents-and-editing)
         - [[defaults]](#defaults)
         - [[filters]](#filters)
-        - [[secrets]](#secrets)
+        - [[secret]](#secret)
         - [[sites]](#sites)
         - [[override]](#override) 
         - [[equipmentoverrides]](#equipmentoverrides)
@@ -46,8 +47,8 @@ deliberate differences listed under
         - [AstroBin's Long Exposure Acquisition Fields](#astrobin-long-exposure-acquisition-fields)
     - [Astrobin Filter-Code mappings](#astrobin-filter-code-mappings)
         - [Finding the AstroBin's Numeric ID for Filters](#finding-astrobins-numeric-id-for-filters)
-    - [Accessing sky quality data](#accessing-sky-quality-data)
-    - [Reverse Geocoding](#reverse-geocoding)
+    - [Sky quality (Bortle and SQM)](#sky-quality-bortle-and-sqm)
+    - [Site names and reverse geocoding](#site-names-and-reverse-geocoding)
     - [FWHM values](#fwhm-values)
     - [Data Sources](#data-sources )
 - [Contributing](#contributing)
@@ -80,7 +81,7 @@ Key features include:
 
     where x is the panel number. N.I.N.A does this automatically but in Sequence Generator Pro the user will have to edit the directory name in Target Settings before starting the sequence.
 
-- **Multiple site support**: Multi-site collaborative target acquisition or remote observatory image capture is supported. Site locations are recognised from the coordinates in the headers: readings are clustered and matched against the `[sites]` section of your `config.ini` (no network call is made). Data from multiple sites is reported with summary outputs that correctly identify the site contribution, for instance equipment, LIGHT, and calibration data. All data is, however, aggregated in the AstroBin.csv file for the image target.
+- **Multiple site support**: Multi-site collaborative target acquisition or remote observatory image capture is supported. Site locations are recognised from the coordinates in the headers: readings are clustered and matched against the `[sites]` section of your `config.ini`. A cluster with no match is looked up online — see [Sky quality and site naming](#sky-quality-and-site-naming) — and the result is saved back to `[sites]`, so a site is looked up once and never again. Data from multiple sites is reported with summary outputs that correctly identify the site contribution, for instance equipment, LIGHT, and calibration data. All data is, however, aggregated in the AstroBin.csv file for the image target.
 
 - **Support for multiple file formats**: Extracts headers for all FITS/FIT/FTS/XISF files in specified directories. Directories can have a mix of files. 
 
@@ -115,24 +116,18 @@ Key features include:
 # **Differences from the Python utility**
 
 Everything this program *produces* is byte-for-byte identical to
-AstroBinUploader v2.2.0 **run offline**: the acquisition CSV, the session
-summary, the `debug_step_*.csv` files, and the console output. That is checked
+AstroBinUploader v2.2.0: the acquisition CSV, the session summary, the
+`debug_step_*.csv` files, and the console output — including its restored
+online site lookup, given the same `config.ini`. That is checked
 automatically, on every change, by running both programs side by side and
-comparing the results byte for byte.
-
-"Run offline" is the one qualification that matters, and it is the first row
-of the table below. The Python utility's v2.2.0 restored the ability to look
-an unknown observing site up online; this port has no network code and does
-not. Given the same `config.ini` **without** a `[secret]` section — which is
-how the comparison corpus is configured — the two agree exactly. Given a
-`[secret]` section, the Python utility can name a site this port would leave
-as the `[defaults]` value.
+comparing the results byte for byte, both offline (no `[secret]` configured)
+and online, against the same coordinates and the same live services.
 
 The differences are these, and they are all deliberate.
 
 | | Python utility | This edition |
 |---|---|---|
-| **Unknown observing site** | With `[secret]`, looks the coordinates up online (OpenStreetMap for the address, lightpollutionmap.info for Bortle/SQM) and saves the result to `[sites]` | No network code at all; `[secret]` is ignored and `[defaults]` is used. Run the Python utility once to add a new site |
+| **Unknown observing site, online lookup** | `requests` + `geopy`'s Nominatim client, via whatever TLS stack Python was built against | `ureq` with rustls and bundled root certificates — no system OpenSSL or CA store needed on any platform, which keeps the single-binary premise on Linux in particular |
 | **Installing** | Python 3.x, then `pip install -r requirements.txt` | Nothing. One executable. |
 | **Calling it** | `astrobin-upload "dir"` | `astrobin-upload "dir"` |
 | **First run** | Called with no arguments, writes a default `config.ini` and exits | Same |
@@ -240,30 +235,37 @@ The data in the [defaults] section can be modified by the user. If the utility c
 ### **[filters]**
 The filter section holds the filter name to AstroBin code mappings. The filter names and codes can be modified here.
 
-### **[secrets]** — removed in v2.1.0
+### **[secret]**
+The secret section holds:
+1. The sky quality API key and API endpoint required by the utility to obtain values of Bortle and SQM for the site location. Only the API key is to be edited. If there is no valid API key the values of Bortle and SQM are taken from `[defaults][BORTLE]` and `[defaults][SQM]` in the config.ini file.
 
-**This section is no longer used and can be deleted from your `config.ini`.**
+2. Your email address. This is sent as part of an information string to the reverse geocoding API, which is used to recover the site address. Unique site latitude and longitude values extracted from the headers are passed to the API to generate the site address. Your email address is passed to the API as a courtesy, so the provider can see who is using their API. If the API request fails the site location information is taken from `[defaults][SITE]`, `[defaults][SITELAT]` and `[defaults][SITELONG]` in the config.ini file.
 
-Earlier versions called two external APIs: lightpollutionmap.info for Bortle
-and SQM, and Nominatim reverse geocoding for the site address. Neither is
-called any more — the utility is fully offline. Site information now comes
-from the `[sites]` section (matched by coordinate), falling back to
-`[defaults]` (`SITE`, `SITELAT`, `SITELONG`, `BORTLE`, `SQM`) when no site
-matches. Nothing reads an API key or an email address, so leaving the old
-section in place is harmless but pointless.
+```
+[secret]
+        #API key        API endpoint
+        YOUR_API_KEY = https://www.lightpollutionmap.info/QueryRaster/
+        EMAIL_ADDRESS = your_email@example.com
+```
+
+This edition talks to the same two services the Python utility does —
+lightpollutionmap.info and Nominatim (OpenStreetMap) — over `ureq` with
+rustls and bundled root certificates rather than Python's `requests`/`geopy`
+stack, so no system TLS library or CA store is needed on any platform. Every
+failure mode degrades the same way as the Python utility: no valid key, no
+network, a refused or malformed response — the run always completes, falling
+back to `[defaults]`.
 
 ### **[sites]**
-The `[sites]` section is your own list of known observing sites. The utility
-clusters the GPS coordinates found in your headers (drifting readings within
-about 110 m are treated as one site) and looks the resulting position up here.
-A match supplies the site's name, Bortle and SQM; no match falls back to
-`[defaults]`.
-
-**You maintain this section yourself.** Earlier versions appended new sites
-automatically after a reverse-geocoding call; since v2.1.0 there are no API
-calls, so add a site by copying the block format shown below and filling in
-the coordinates your headers actually carry (`--debug` writes them to
-`debug_step_00_RawHeaders.csv` if you need to look them up).
+The `[sites]` section holds historic site information the utility has found.
+When the utility runs it first looks here to collect site information; only
+if a site found in the headers does not exist does it access the external
+APIs. The utility automatically updates this section if a new site is found.
+You do not normally have to edit this section, but a remote site's
+information can be added here by hand if the API cannot be reached — copy
+the block format shown below and fill in the coordinates your headers
+actually carry (`--debug` writes them to `debug_step_00_RawHeaders.csv` if
+you need to look them up).
 
 ### **[override]**
 
@@ -389,28 +391,40 @@ Modify the [filters] section to reflect your imaging set up, see [Astrobin Filte
 <div style="page-break-after: always;"></div>
 
 
-A `[secret]` section appears in configs generated by v2.0.x and earlier. It
-held a sky-quality API key and an email address for reverse geocoding. **It is
-no longer read** — since v2.1.0 the utility makes no network calls at all —
-and can be deleted.
+```
+[secret]
+        #API key        API endpoint
+        YOUR_API_KEY = https://www.lightpollutionmap.info/QueryRaster/
+        EMAIL_ADDRESS = your_email@example.com
+```
+If you wish to automatically generate an address and sky quality information
+for the observation site, enter the [Sky Quality API key](#sky-quality-bortle-and-sqm)
+and your [email address](#site-names-and-reverse-geocoding) here. If you don't
+wish to do this, or if the lookup fails, the utility falls back to the site
+parameters found in the [defaults] section.
 
 ```
 [sites]
 ```
-Site information comes from the `[sites]` section, which you maintain by hand
-(earlier versions appended to it automatically after a geocoding call). A site
-block looks like this — the coordinates are matched against the clustered
-positions found in your headers:
+The `[sites]` section is populated automatically by the utility. If a new
+site is found it is looked up and added here. You do not normally need to
+edit this section.
 
 ```
 [sites]
-        [["My Full Site Address, Country, Postcode"]]
-                latitude = 0.0000
-                longitude = 0.0000
+        [["Norton Close, Papworth Everard, South Cambridgeshire, Cambridgeshire, Cambridgeshire and Peterborough, England, CB23 3XT, United Kingdom"]]
+                latitude = 52.2484
+                longitude = -0.1231
                 bortle = 4
-                sqm = 21
+                sqm = 20.52
 ```
-When the utility processes [SITELAT] and [SITELONG] header entries it looks here to see whether the position matches a site you have listed. If it does, the site's name, Bortle and SQM are used. If it does not, the utility falls back to the site parameters found in the [defaults] section of the config.ini file. New sites are added by hand in the [sites] section, following the format shown above.
+When the utility processes SITELAT and SITELONG header entries it looks here
+first to see if a site has been seen before. If it has, the utility uses the
+site information found; if not, it calls the external APIs to retrieve the
+information and saves the result here. If the external API call fails, the
+utility falls back to the site parameters found in the [defaults] section of
+the config.ini file. New sites can also be added by hand, following the
+format shown above.
 
 ```
 [override]
@@ -653,8 +667,8 @@ Use `$HOME/Astro/M31`, or leave the tilde unquoted so the shell expands it.
 * **Non-Standard Keywords**: If your capture software uses unique names for standard data, use the `[override]` section in `config.ini` to map them (e.g., mapping `CAMERA_MODEL` to `INSTRUME`).
 
 ### **Sky Quality and Site Naming**
-* **No network calls**: this port contacts no external service. Bortle, SQM and the site name come from a matching `[sites]` entry, or from `[defaults]` when no site matches. The Python utility can also look an unknown site up online (restored in its v2.2.0); this port does not — see [Differences from the Python utility](#differences-from-the-python-utility). See [Sky quality](#sky-quality-bortle-and-sqm) and [Site names](#site-names-and-reverse-geocoding) below.
-* **Unexpected site name**: site naming is local and coordinate-clustered. If a session is attributed to the wrong site, check that its `[sites]` latitude and longitude match the frames' headers.
+* **A new site isn't being looked up online**: check `[secret]` has a real 16-character API key (not the `YOUR_API_KEY` placeholder) and a real `EMAIL_ADDRESS` (not `your_email@example.com`). Without either, or without a network connection, an unmatched site silently falls back to `[defaults]` — the run always completes either way. See [Sky quality](#sky-quality-bortle-and-sqm) and [Site names](#site-names-and-reverse-geocoding) below.
+* **Unexpected site name**: site naming is coordinate-clustered. If a session is attributed to the wrong site, check that its `[sites]` latitude and longitude match the frames' headers.
 
 <div style="page-break-after: always;"></div>
 
@@ -725,12 +739,27 @@ From this URL, the AstroBin code for this Astronomik 2-inch H-alpha CCD 6nm filt
 Bortle and SQM come from your `config.ini` — from a matching entry in
 `[sites]`, or from `[defaults]` when no site matches. You can fill those in by
 hand: look your site up by latitude and longitude at the excellent
-<https://www.lightpollutionmap.info> and copy the figures across.
+<https://www.lightpollutionmap.info> and copy the figures across, or let the
+utility do it: with a valid API key and endpoint in `[secret]`, an
+unrecognised site is looked up automatically and the result saved to
+`[sites]`, so a site is looked up once and never again.
 
-**This port does not look them up online.** The Python utility can, given an
-API key in `[secret]` (a capability dropped by its v2.0.0 rewrite and restored
-in its v2.2.0); the port has no network code at all and ignores `[secret]`
-entirely, so an unrecognised site always falls back to `[defaults]`.
+The only `API_ENDPOINT` currently supported is
+`https://www.lightpollutionmap.info/QueryRaster/`. You will have to apply to
+Jurij Stare, the website owner, for an API key — his email address is
+`starej@t-2.net`. A reasonable approach: donate a small amount in support of
+his website; he will send a thank-you e-mail, and in response you can ask for
+an API key.
+
+`[secret]` section format relating to the sky quality API:
+
+| **API Key** | **API Endpoint**|
+| ----------- | --------------- |
+| **************** | https://www.lightpollutionmap.info/QueryRaster/ |
+
+If there is no valid key, or the request fails or the network is unreachable,
+Bortle and SQM fall back to `[defaults][BORTLE]` and `[defaults][SQM]` — the
+run always completes either way.
 
 ## **Site names and reverse geocoding**
 
@@ -741,14 +770,30 @@ Site naming works like this:
    ordinary GPS drift across sessions.
 2. Each cluster's centroid is looked up in `[sites]`. A match supplies that
    site's name, Bortle and SQM.
-3. No match falls back to `[defaults]` (`SITE`, `SITELAT`, `SITELONG`,
-   `BORTLE`, `SQM`).
+3. No match is looked up via Nominatim (OpenStreetMap) reverse geocoding, and
+   the result is saved back to `[sites]` so it is only ever looked up once.
+   If the lookup fails, or `[secret][EMAIL_ADDRESS]` is unset or still the
+   `your_email@example.com` placeholder, it falls back to `[defaults]`
+   (`SITE`, `SITELAT`, `SITELONG`, `BORTLE`, `SQM`).
+
+Reverse geocoding is required to produce accurate summary information with
+multi-site data; without it, all data is aggregated under the default site.
+It does not affect the AstroBin.csv output, since that is aggregated across
+sites for any target regardless.
+
+`[secret]` section format relating to reverse geocoding:
+
+| **Key** | **Value**|
+| ----------- | --------------- |
+| EMAIL_ADDRESS | id@provider.com |
+
+Set `EMAIL_ADDRESS` to your own address — it is sent to the API as a courtesy
+so the provider can see who is using it, and must be a real address.
 
 The long postal addresses you may already have in `[sites]` were produced by
-the Python utility's reverse geocoding — they were never meant to be typed by
-hand. This port reads them, but cannot create new ones: it performs no
-reverse geocoding. Run the Python utility once to add a new site, or write the
-entry yourself.
+this same reverse geocoding, on either side — they were never meant to be
+typed by hand, though you are free to add or edit an entry yourself using the
+block format shown above.
 
 Multi-site sessions therefore still report per-site correctly, provided each
 site has an entry in `[sites]`. Add one by hand using the format shown in the

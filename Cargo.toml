@@ -1,6 +1,6 @@
 [package]
 name = "astrobin-upload"
-version = "2.1.3"
+version = "2.2.1"
 edition = "2021"
 rust-version = "1.74"
 description = "Astrophotography metadata ETL for AstroBin bulk uploads — Rust port of AstroBinUpload.py"
@@ -12,6 +12,7 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 clap = { version = "4.5", features = ["derive"] }
 rayon = "1.10.0"
 roxmltree = "0.21.1"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [profile.release]
 lto = true
