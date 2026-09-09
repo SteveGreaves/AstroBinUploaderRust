@@ -50,7 +50,7 @@ CONFIG = HERE / "golden_config.ini"
 # The oracle runs the *live* Python pipeline, so the checkout it imports is as
 # much a part of the baseline as the fixtures are -- and unlike the fixtures,
 # nothing here is a committed copy. Both are verified below.
-PARITY_TARGET = "2.1.3"
+PARITY_TARGET = "2.2.0"
 PYTHON = os.environ.get(
     "ASTROBIN_PYTHON", "/mnt/raid0/Code/venvs/.astrovenv/bin/python3"
 )

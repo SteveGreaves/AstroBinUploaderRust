@@ -81,7 +81,7 @@ impl AppConfig {
                         {
                             crate::log_warning!(
                                 "_normalize_overrides",
-                                197,
+                                288,
                                 "[override] target '{k}' does not match any recognized \
                                  internal column and will have no effect. Check for a \
                                  typo (did you mean one of: {}?)",
@@ -107,7 +107,7 @@ impl AppConfig {
                 {
                     crate::log_warning!(
                         "_normalize_equipment_overrides",
-                        222,
+                        313,
                         "[equipmentoverrides] target '{k}' does not match any recognized \
                          internal column and will have no effect."
                     );

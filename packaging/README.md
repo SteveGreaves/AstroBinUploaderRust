@@ -115,15 +115,24 @@ Key features include:
 # **Differences from the Python utility**
 
 Everything this program *produces* is byte-for-byte identical to
-AstroBinUploader v2.1.3: the acquisition CSV, the session summary, the
-`debug_step_*.csv` files, and the console output. That is checked
+AstroBinUploader v2.2.0 **run offline**: the acquisition CSV, the session
+summary, the `debug_step_*.csv` files, and the console output. That is checked
 automatically, on every change, by running both programs side by side and
 comparing the results byte for byte.
+
+"Run offline" is the one qualification that matters, and it is the first row
+of the table below. The Python utility's v2.2.0 restored the ability to look
+an unknown observing site up online; this port has no network code and does
+not. Given the same `config.ini` **without** a `[secret]` section — which is
+how the comparison corpus is configured — the two agree exactly. Given a
+`[secret]` section, the Python utility can name a site this port would leave
+as the `[defaults]` value.
 
 The differences are these, and they are all deliberate.
 
 | | Python utility | This edition |
 |---|---|---|
+| **Unknown observing site** | With `[secret]`, looks the coordinates up online (OpenStreetMap for the address, lightpollutionmap.info for Bortle/SQM) and saves the result to `[sites]` | No network code at all; `[secret]` is ignored and `[defaults]` is used. Run the Python utility once to add a new site |
 | **Installing** | Python 3.x, then `pip install -r requirements.txt` | Nothing. One executable. |
 | **Calling it** | `astrobin-upload "dir"` | `astrobin-upload "dir"` |
 | **First run** | Called with no arguments, writes a default `config.ini` and exits | Copy `config.ini.example` to `config.ini` yourself; a missing config is an error |
@@ -641,7 +650,7 @@ Use `$HOME/Astro/M31`, or leave the tilde unquoted so the shell expands it.
 * **Non-Standard Keywords**: If your capture software uses unique names for standard data, use the `[override]` section in `config.ini` to map them (e.g., mapping `CAMERA_MODEL` to `INSTRUME`).
 
 ### **Sky Quality and Site Naming**
-* **No network calls**: since v2.1.0 the program contacts no external service. Bortle and SQM come from a matching `[sites]` entry, or from `[defaults]` when no site matches — see [Sky quality](#sky-quality) and [Site names](#site-names-formerly-reverse-geocoding) below.
+* **No network calls**: this port contacts no external service. Bortle, SQM and the site name come from a matching `[sites]` entry, or from `[defaults]` when no site matches. The Python utility can also look an unknown site up online (restored in its v2.2.0); this port does not — see [Differences from the Python utility](#differences-from-the-python-utility). See [Sky quality](#sky-quality-bortle-and-sqm) and [Site names](#site-names-and-reverse-geocoding) below.
 * **Unexpected site name**: site naming is local and coordinate-clustered. If a session is attributed to the wrong site, check that its `[sites]` latitude and longitude match the frames' headers.
 
 <div style="page-break-after: always;"></div>
@@ -710,24 +719,19 @@ From this URL, the AstroBin code for this Astronomik 2-inch H-alpha CCD 6nm filt
 
 ## **Sky quality (Bortle and SQM)**
 
-**As of v2.1.0 the utility makes no network calls.** Bortle and SQM come from
-your `config.ini` — either from a matching entry in `[sites]`, or from
-`[defaults]` when no site matches.
+Bortle and SQM come from your `config.ini` — from a matching entry in
+`[sites]`, or from `[defaults]` when no site matches. You can fill those in by
+hand: look your site up by latitude and longitude at the excellent
+<https://www.lightpollutionmap.info> and copy the figures across.
 
-To fill those values in, look your observing site up by latitude and longitude
-at the excellent <https://www.lightpollutionmap.info> and copy the Bortle and
-SQM figures it reports into the relevant section. Earlier versions could fetch
-this automatically with an API key held in `[secret]`; that path was removed,
-along with the section.
+**This port does not look them up online.** The Python utility can, given an
+API key in `[secret]` (a capability dropped by its v2.0.0 rewrite and restored
+in its v2.2.0); the port has no network code at all and ignores `[secret]`
+entirely, so an unrecognised site always falls back to `[defaults]`.
 
-## **Site names (formerly reverse geocoding)**
+## **Site names and reverse geocoding**
 
-Also removed in v2.1.0. Earlier versions passed each site's coordinates to the
-Nominatim / OpenStreetMap API (via `geopy`) to turn them into a postal
-address, using an email address from `[secret]` as the courtesy identifier.
-`geopy` is no longer a dependency at all.
-
-Site naming is now entirely local, and works like this:
+Site naming works like this:
 
 1. Coordinates from every frame's headers are clustered — readings within
    about 110 m of each other are treated as one physical site, which absorbs
@@ -736,6 +740,12 @@ Site naming is now entirely local, and works like this:
    site's name, Bortle and SQM.
 3. No match falls back to `[defaults]` (`SITE`, `SITELAT`, `SITELONG`,
    `BORTLE`, `SQM`).
+
+The long postal addresses you may already have in `[sites]` were produced by
+the Python utility's reverse geocoding — they were never meant to be typed by
+hand. This port reads them, but cannot create new ones: it performs no
+reverse geocoding. Run the Python utility once to add a new site, or write the
+entry yourself.
 
 Multi-site sessions therefore still report per-site correctly, provided each
 site has an entry in `[sites]`. Add one by hand using the format shown in the
