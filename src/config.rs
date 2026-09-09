@@ -168,7 +168,11 @@ fn section_at_mut<'a>(root: &'a mut ConfigFile, path: &[String]) -> &'a mut Sect
 /// The name is unquoted if it is wrapped in matching quotes — that is how a
 /// site name containing commas survives, e.g.
 /// `[["Norton Close, Papworth Everard, ... CB23 3XT, United Kingdom"]]`.
-fn parse_header(line: &str) -> Result<(String, usize)> {
+///
+/// `pub(crate)`: `config_write`'s `[sites]` splice reuses this to find
+/// section boundaries in a file it never fully parses, so the two agree on
+/// what a header line is rather than each guessing separately.
+pub(crate) fn parse_header(line: &str) -> Result<(String, usize)> {
     let open = line.len() - line.trim_start_matches('[').len();
     if open == 0 {
         bail!("no opening bracket");
