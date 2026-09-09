@@ -5,13 +5,18 @@ name: Differential harness
 # this port side by side and byte-compare the result. Report-only by design
 # (the port plan's decision 4 -- "the differential harness runs during
 # development and for one release of overlap, then retires", not permanent
-# infrastructure to gate merges with) and this repo pushes straight to main
-# with no PR workflow yet, so there is nothing for a blocking check to
-# usefully block. `continue-on-error` on every harness step keeps the job
-# green even on a genuine divergence -- the point is a visible red step and
+# infrastructure to gate merges with), so there is nothing for a blocking
+# check to usefully block. `continue-on-error` on every harness step keeps the
+# job green even on a genuine divergence -- the point is a visible red step and
 # an annotation, not a failed run someone has to re-trigger.
+#
+# Runs on pull requests as well as pushes to main: a change that adds or
+# re-blesses a fixture is exactly what this harness exists to check, and
+# reviewing it after the merge is too late to be useful.
 on:
   push:
+    branches: ["main"]
+  pull_request:
     branches: ["main"]
   workflow_dispatch:
 
