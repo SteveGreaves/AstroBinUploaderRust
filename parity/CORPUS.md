@@ -55,46 +55,60 @@ python3 AstroBinUpload.py "<scratch>/LBN 548" "/mnt/raid0/AstroImaging/Source/LB
 ## `ic405`, captured for this port (2026-09-09)
 
 Closes the `DARKFLAT` gap the section below used to record. Same rules as the
-two fixtures above -- no upstream counterpart, listed in `LOCAL_FIXTURES` -- but
-blessed against live Python **v2.1.2**, the current parity target.
+two fixtures above -- no upstream counterpart, listed in `LOCAL_FIXTURES` --
+originally blessed against live Python v2.1.2 and re-blessed against **v2.1.3**
+after the fix below, the current parity target.
 
 | Fixture | Rows | Source directory | What it adds |
 |---|---|---|---|
 | `ic405` | 1365 | `/mnt/raid0/AstroImaging/Preselected/Flaming Star Nebula (IC405) started 4th February 2022` | The only fixture with `IMAGETYP = 'DARKFLAT'` frames (765 LIGHT, 350 FLAT, 250 DARKFLAT), so the only one whose `flatDarks` column is non-zero and whose summary emits a `DARKFLATS:` section and a `Total DARKFLAT Exposure Time` line. Also the only fixture where `GeocodeStep` forms **two** clusters. Has `SOURCE_PATH`, so like `lbn548` it takes the normal `(directory, basename)` dedup branch. |
 
-### The two-cluster geocode, and why the report still says one site
+### The `Latitude: 0.0000` bug this fixture found, and its fix (Python v2.1.3)
 
-Traced through the step dumps, not inferred. In
+Traced through the step dumps, not inferred. Blessed originally against
+Python **v2.1.2**, `ic405_summary.txt` reported `Latitude: 0.0000° /
+Longitude: 0.0000°` -- the Gulf of Guinea, not Papworth Everard. In
 `debug_step_00_RawHeaders.csv`, 602 of the 1365 frames carry no `SITELAT` at
 all: all 350 FLATs, all 250 DARKFLATs, and **two LIGHTs**. Then, in order:
 
-1. `base.py:225` -- Stage 7, "Core Column Hardening", inside
-   `NormalizeHeadersStep` -- fills missing `SITELAT`/`SITELONG` with `0.0`.
-   By `debug_step_01` nothing is null any more and the column has gained a
-   seventh distinct value.
+1. `base.py:225` (Stage 7, "Core Column Hardening") filled every missing
+   `SITELAT`/`SITELONG` with a hardcoded `0.0` -- **not** the site the user
+   had configured (`SITELAT = 52.2484` in `golden_config.ini`), because that
+   config value was only ever honoured when the *column* was missing
+   outright, not when it was present with some blank cells. `ic405` was the
+   fixture that found this: it has real `SITELAT` on 763 frames and none on
+   602, exactly the case the old code got wrong. By `debug_step_01`, nothing
+   was null any more and the column had gained a bogus seventh distinct
+   value.
 2. `GeocodeStep._align_coordinates` (`geocode.py:186`) exists to give
-   calibration frames a light frame's coordinates, but it decides via
-   `pd.isna()`. Nothing is NA by then, so the "Direct fallback" branch never
-   fires and every calibration frame takes the geodesic-match branch instead.
+   calibration frames a light frame's coordinates, but decided via
+   `pd.isna()`. Nothing was NA by then, so its "direct fallback" branch never
+   fired and every calibration frame took the geodesic-match branch instead.
 3. That branch assigns each frame the coordinates of the **nearest** LIGHT.
-   Two LIGHTs now sit at `0, 0`, so for a frame already at `0, 0` the nearest
-   light is one of those two, at distance zero. All 600 calibration frames are
-   "aligned" onto `0, 0`. The loop iterates over non-LIGHT rows only, so the two
-   zero-filled lights are never repaired either.
+   Two LIGHTs sat at `0, 0`, so a frame already at `0, 0` found its nearest
+   light there too, at distance zero -- pulling all 600 calibration frames
+   onto `0, 0`. The loop iterates over non-LIGHT rows only, so the two
+   zero-filled LIGHTs were never repaired either.
 
 `0, 0` is some 5800 km outside `CLUSTER_RADIUS_M = 110.0` metres of Papworth
-Everard, so the greedy single-linkage pass produces two clusters,
-`(52.248426, -0.123102)` and `(0.0, 0.0)` -- visible in
-`debug_step_05_GeocodeStep.csv`. Both resolve to the same site *name* through
-the database lookup, and the report groups by name, which is why
-`ic405_summary.txt` prints one `Site:` block and `check_reports.py` reports
-`1 site(s)`. Its `Latitude: 0.0000` / `Longitude: 0.0000` is not a capture
-error; it is what live Python v2.1.2 emits for this data, and the port
-reproduces it byte for byte. Whether Python *should* emit it is an upstream
-question, not a parity one.
+Everard, so the greedy single-linkage pass formed two clusters,
+`(52.248426, -0.123102)` and `(0.0, 0.0)`. Both resolved to the same site
+*name* through the database lookup (the report groups by name), which is why
+`check_reports.py` still says `1 site(s)` even with two clusters live.
 
-This is *not* the missing multi-site fixture: the report's per-site loop still
-runs exactly once. See "Not yet covered by any fixture" below.
+**Fixed upstream in Python v2.1.3** (`base.py`'s `_configured_default`):
+Stage 7 now looks up `config.defaults` for a per-cell blank the same way
+Stage 3 already does for a wholly-missing column, falling back to the
+hardcoded literal only when the config doesn't define that key. Six other
+fields had the identical bug (`GAIN`, `EGAIN`, `FOCALLEN`, `XPIXSZ`,
+`SITELONG`, `OBJECT`); see `CHANGELOG.md`'s `[2.1.3]` entry in the Python
+repo. `ic405_summary.txt` was re-blessed: `Latitude: 52.2484°`, the
+configured site, and both clusters now share one real coordinate rather than
+one real and one bogus.
+
+This was never the missing multi-site fixture, before or after the fix: the
+report's per-site loop has still never run twice. See "Not yet covered by
+any fixture" below.
 
 ### How it was captured and blessed
 
@@ -204,6 +218,32 @@ its `Generated` line changed (`sadr` carries no calibration frames at all).
 re-blessed the same way, for the same reason (also all-raw). `xisf_mixed` and
 `synthetic` in the binary corpus needed no change: neither is all-raw, so the
 label was already `MASTERxxx` correctly before and after.
+
+## Parity target bumped to v2.1.3 (2026-09-09)
+
+Found while capturing the `ic405` fixture above: a `[defaults]` value was
+only ever honoured when its whole header column was missing, not when the
+column existed with some per-cell blanks -- silently discarding the user's
+configured `SITELAT`/`SITELONG` (and six other fields) for exactly the
+`ic405` case. Fixed upstream in Python `v2.1.3` (`engine/steps/base.py`'s
+`_configured_default`) and ported to `src/steps/normalize.rs`'s
+`stage7_harden` identically. Full account, including the mechanism and all
+seven affected fields, in `CHANGELOG.md`'s `[2.1.3]` entry in the Python repo
+and in this file's `ic405` section above.
+
+`check_steps.py`'s `PARITY_TARGET` is now `"2.1.3"`. Only `ic405_summary.txt`
+needed re-blessing: it is the only fixture where any of the seven affected
+fields is both present and partially blank (`sadr`, `sh2101_calib`, `lbn548`
+have no blanks in any of them; `mosaic`'s 326 blank `OBJECT` values land only
+in calibration-type rows that never reach the `Target:` line, verified
+byte-identical against its existing reference both before and after).
+
+Six unit tests pin this in `src/steps/normalize.rs`: the per-cell fallback
+preferring a configured default over the hardcoded one (`GAIN`, `SITELAT`,
+`SITELONG`, `OBJECT`), the hardcoded literal still applying with no config
+value present, and `FOCALLEN`'s exact type asymmetry -- Python's fallback
+(`500`) is a bare int never passed through `cast`, so an entirely-missing
+column stays int-typed until a configured value exists to cast to float.
 
 ## Not yet covered by any fixture
 

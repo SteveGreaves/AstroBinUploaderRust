@@ -1,4 +1,4 @@
-# AstroBin Upload Utility v2.1.2 — Rust edition
+# AstroBin Upload Utility v2.1.3 — Rust edition
 
 A single self-contained executable that processes FITS/XISF headers and creates
 the AstroBin data acquisition file and summary text. No Python, no libcfitsio,
@@ -8,7 +8,7 @@ Usage:
 `astrobin-upload [directory_paths] [--config config_file]`
 
 This is a port of [AstroBinUploader](https://github.com/SteveGreaves/AstroBinUploader)
-and its output is byte-for-byte identical to that utility at v2.1.2 — the same
+and its output is byte-for-byte identical to that utility at v2.1.3 — the same
 CSV, the same summary, to the last digit and trailing space. Everything this
 document says about *what the program does* therefore applies to both; the
 sections that differ are installation, how you call it, and the handful of
@@ -115,7 +115,7 @@ Key features include:
 # **Differences from the Python utility**
 
 Everything this program *produces* is byte-for-byte identical to
-AstroBinUploader v2.1.2: the acquisition CSV, the session summary, the
+AstroBinUploader v2.1.3: the acquisition CSV, the session summary, the
 `debug_step_*.csv` files, and the console output. That is checked
 automatically, on every change, by running both programs side by side and
 comparing the results byte for byte.

@@ -77,8 +77,19 @@ def dumps_agree(exe: pathlib.Path, scenario: pathlib.Path, outdir: pathlib.Path,
                         f"    reference: {a}\n"
                         f"    actual:    {b}"), None
             field = a.split("\t")
-            hint = run([PYTHON, str(HERE / "narrow.py"), str(py_path), str(rs_path)],
-                       check=False).stdout if (HERE / "narrow.py").exists() else ""
+            # narrow.py's own exit status reflects "found a differing cell",
+            # not "the subprocess failed" -- run()'s hardcoded check=True
+            # would turn a genuine mismatch report into a crash here, which
+            # is exactly the case this whole branch exists to handle. Call
+            # subprocess directly rather than fighting run()'s signature.
+            hint = (
+                subprocess.run(
+                    [PYTHON, str(HERE / "narrow.py"), str(py_path), str(rs_path)],
+                    capture_output=True, text=True,
+                ).stdout
+                if (HERE / "narrow.py").exists()
+                else ""
+            )
             return (f"line {i + 1} differs, step {field[1]}, column {field[2]}\n"
                     + (hint or "")), None
     return f"line count differs: python={len(py_lines)} rust={len(rs_lines)}", None

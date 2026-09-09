@@ -1,10 +1,10 @@
 Observation session summary
-Generated 2026-09-09 07:57:33
+Generated 2026-09-09 10:15:58
  Target: IC 405
 
 Site: Papworth Everard
-	Latitude: 0.0000°
-	Longitude: 0.0000°
+	Latitude: 52.2484°
+	Longitude: -0.1231°
 	Bortle scale: 4.0
 	SQM: 21.00 mag/arcsec²
 
