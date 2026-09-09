@@ -522,6 +522,18 @@ pub struct SiteLookup<'a> {
     default_site: String,
     default_bortle: i64,
     default_sqm: f64,
+    /// The raw `[defaults]` strings for BORTLE/SQM, as configobj would hand
+    /// them back -- *not* `default_bortle`/`default_sqm` stringified.
+    /// `_normalize_defaults` never coerces types (`{k.upper()...: v for ...}`,
+    /// `v` untouched), so `resolve`'s "Sky quality unavailable" line
+    /// interpolates whatever the user wrote: `SQM = 21` logs `SQM 21`, not
+    /// `SQM 21.0`. Measured against live Python (2026-09-09) rather than
+    /// assumed from the coerced value used everywhere else -- the two only
+    /// diverge for this one log line, since `resolve`'s *returned* dict does
+    /// coerce (`int(float(bortle))`, `float(sqm)`) before this struct's
+    /// other fields are read.
+    default_bortle_raw: String,
+    default_sqm_raw: String,
     /// False when no usable `[secret]` was supplied, in which case `resolve`
     /// is never called and no request is ever made.
     pub enabled: bool,
@@ -572,6 +584,10 @@ impl<'a> SiteLookup<'a> {
             default_site: default_str(cfg, "SITE", "Unknown Site"),
             default_bortle: default_int(cfg, "BORTLE", 4),
             default_sqm: default_float(cfg, "SQM", 21.0),
+            // Python's fallback is the literal `4` / `21.0`, which an
+            // f-string renders as "4" / "21.0" -- matched here, not "21".
+            default_bortle_raw: default_str(cfg, "BORTLE", "4"),
+            default_sqm_raw: default_str(cfg, "SQM", "21.0"),
             enabled,
         }
     }
@@ -638,8 +654,8 @@ impl<'a> SiteLookup<'a> {
                     "resolve",
                     374,
                     "Sky quality unavailable, using defaults: Bortle {}, SQM {}",
-                    self.default_bortle,
-                    python_repr_f64(self.default_sqm)
+                    self.default_bortle_raw,
+                    self.default_sqm_raw
                 );
                 (self.default_bortle, self.default_sqm)
             }
@@ -1021,5 +1037,99 @@ mod tests {
             http_status_message(503, Some("Service Unavailable"), "https://x/"),
             "503 Server Error: Service Unavailable for url: https://x/"
         );
+    }
+
+    /// A transport that answers Nominatim and lightpollutionmap differently
+    /// by URL, so `SiteLookup::resolve` can be driven through the "geocoding
+    /// succeeded, sky quality failed" branch specifically.
+    struct SplitTransport {
+        geocode_body: &'static str,
+        sky_quality_result: Result<&'static str, &'static str>,
+    }
+
+    impl HttpTransport for SplitTransport {
+        fn get(
+            &self,
+            url: &str,
+            _params: &[(String, String)],
+            _user_agent: Option<&str>,
+        ) -> Result<String, String> {
+            if url == NOMINATIM_REVERSE_URL {
+                Ok(self.geocode_body.to_string())
+            } else {
+                self.sky_quality_result
+                    .map(str::to_string)
+                    .map_err(str::to_string)
+            }
+        }
+    }
+
+    fn app_config(text: &str) -> crate::appconfig::AppConfig {
+        crate::appconfig::AppConfig::from_config(&crate::config::ConfigFile::parse_str(text).unwrap())
+            .unwrap()
+    }
+
+    /// The bug this test exists for: `resolve`'s "Sky quality unavailable"
+    /// line interpolates the *raw* `[defaults]` string (`SQM = 21` -> "SQM
+    /// 21"), not the value coerced to `f64` and re-rendered ("SQM 21.0").
+    /// Caught by running the equivalent live Python and comparing, not by
+    /// reading the source a second time -- the first draft of `SiteLookup`
+    /// got this wrong by reusing the coerced field.
+    #[test]
+    fn sky_quality_unavailable_logs_the_raw_defaults_string_not_a_reformatted_number() {
+        let cfg = app_config(
+            "[defaults]\nSITE = Home\nBORTLE = 4\nSQM = 21\n\
+             [secret]\nYOUR_API_KEY = ABCDEF1234567890\nEMAIL_ADDRESS = a@b.c\n",
+        );
+        let transport = SplitTransport {
+            geocode_body: r#"{"display_name": "Somewhere, Nowhere"}"#,
+            sky_quality_result: Err("network unreachable"),
+        };
+        let lookup = SiteLookup::new(&transport, &cfg);
+        assert!(lookup.enabled);
+        let resolved = lookup.resolve(52.0, -0.1).unwrap();
+        // The *returned* values are still coerced numbers (int(float(...)),
+        // float(...)) -- only the log line differs. Confirmed via
+        // default_sqm_raw directly, since the log itself isn't captured here.
+        assert_eq!(resolved.site, "Somewhere, Nowhere");
+        assert_eq!(resolved.bortle, 4);
+        assert_eq!(resolved.sqm, 21.0);
+        assert_eq!(lookup.default_sqm_raw, "21"); // not "21.0"
+        assert_eq!(lookup.default_bortle_raw, "4");
+    }
+
+    #[test]
+    fn a_resolved_site_can_be_saved_and_a_repeat_is_a_no_op() {
+        let dir = std::env::temp_dir().join(format!(
+            "astrobin_sitelookup_save_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.ini");
+        std::fs::write(&path, "[sites]\n").unwrap();
+
+        let cfg = app_config("[defaults]\nSITE = Home\n");
+        let transport = SplitTransport {
+            geocode_body: "{}",
+            sky_quality_result: Ok("0.1"),
+        };
+        let lookup = SiteLookup::new(&transport, &cfg);
+
+        assert!(lookup.save("New Site", 1.0, 2.0, 4, 21.0, &path));
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("[[New Site]]"));
+
+        // Second save of the same site is a no-op -- file unchanged.
+        assert!(!lookup.save("New Site", 9.0, 9.0, 9, 9.0, &path));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), written);
+
+        // The [defaults] SITE fallback is refused, even if asked for by name.
+        assert!(!lookup.save("Home", 1.0, 2.0, 4, 21.0, &path));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
