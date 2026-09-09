@@ -57,7 +57,22 @@ fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     EARTH_RADIUS_M * 2.0 * a.sqrt().asin()
 }
 
-pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
+/// `GeocodeStep.execute`.
+///
+/// `lookup` is the network layer (Phase 7E). `None` means there is none at
+/// all, which is what the offline unit tests below use; a `SiteLookup` whose
+/// `enabled` is false behaves identically, and that is the ordinary case —
+/// no `[secret]` section, no request ever made.
+///
+/// `config_path` mirrors `SessionState.config_path`: `None` on the `--test`
+/// replay path, which is what stops a diagnostic run from editing the user's
+/// configuration.
+pub fn execute(
+    table: &Table,
+    cfg: &AppConfig,
+    lookup: Option<&crate::sites::SiteLookup>,
+    config_path: Option<&std::path::Path>,
+) -> Result<Table> {
     crate::log_info!(
         "execute",
         73,
@@ -132,6 +147,14 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
     let default_bortle = default_int(cfg, "BORTLE", 4)?;
     let default_sqm = default_float(cfg, "SQM", 21.0)?;
 
+    // A coordinate the local [sites] database does not know can be resolved
+    // over the network instead -- reverse geocoding for the name, the World
+    // Atlas for its sky quality -- and the answer written back so it is only
+    // ever looked up once. `enabled` is false whenever [secret] is absent,
+    // which is what keeps an ordinary run, and the whole golden corpus,
+    // entirely offline.
+    let mut discovered: Vec<(crate::sites::Resolved, f64, f64)> = Vec::new();
+
     let mut site_of: Vec<(String, i64, f64)> = Vec::with_capacity(next_cluster as usize);
     for c in 0..next_cluster {
         let (avg_lat, avg_lon) = centroid[c as usize];
@@ -142,15 +165,36 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
                 sqm.unwrap_or(default_sqm),
             ),
             None => {
-                crate::log_debug!(
-                    "execute",
-                    192,
-                    "Site Cluster {c}: No DB match for averaged coords \
-                     ({avg_lat:.4}, {avg_lon:.4}). Used defaults."
-                );
-                (default_site.clone(), default_bortle, default_sqm)
+                let resolved = lookup
+                    .filter(|l| l.enabled)
+                    .and_then(|l| l.resolve(avg_lat, avg_lon));
+                match resolved {
+                    Some(r) => {
+                        let entry = (r.site.clone(), r.bortle, r.sqm);
+                        discovered.push((r, avg_lat, avg_lon));
+                        entry
+                    }
+                    None => {
+                        crate::log_debug!(
+                            "execute",
+                            192,
+                            "Site Cluster {c}: No DB match for averaged coords \
+                             ({avg_lat:.4}, {avg_lon:.4}). Used defaults."
+                        );
+                        (default_site.clone(), default_bortle, default_sqm)
+                    }
+                }
             }
         });
+    }
+
+    // Persist anything newly resolved, after the loop rather than inside it:
+    // one config write per run, and never a partial one if a later cluster
+    // fails.
+    if let (false, Some(path), Some(lookup)) = (discovered.is_empty(), config_path, lookup) {
+        for (resolved, lat, lon) in &discovered {
+            lookup.save(&resolved.site, *lat, *lon, resolved.bortle, resolved.sqm, path);
+        }
     }
     crate::log_info!(
         "execute",
@@ -403,7 +447,7 @@ mod tests {
              LIGHT,52.2486,-0.1231,x,4.0,21.0\n",
         )
         .unwrap();
-        let out = execute(&df, &cfg("[defaults]\nSITE = Home\nBORTLE = 4\nSQM = 21\n")).unwrap();
+        let out = execute(&df, &cfg("[defaults]\nSITE = Home\nBORTLE = 4\nSQM = 21\n"), None, None).unwrap();
         let lat = out.column("sitelat").unwrap();
         assert_eq!(lat.cells[0], lat.cells[1]);
         assert_eq!(lat.cells[0], Cell::Float(52.2485));
@@ -420,7 +464,7 @@ mod tests {
              LIGHT,40.7500,-111.8833,x,4.0,21.0\n",
         )
         .unwrap();
-        let out = execute(&df, &cfg("[defaults]\nSITE = Home\nBORTLE = 4\nSQM = 21\n")).unwrap();
+        let out = execute(&df, &cfg("[defaults]\nSITE = Home\nBORTLE = 4\nSQM = 21\n"), None, None).unwrap();
         let lat = out.column("sitelat").unwrap();
         assert_ne!(lat.cells[0], lat.cells[1]);
     }
@@ -436,7 +480,7 @@ mod tests {
              LIGHT,52.2484,-0.1231,x,0.0,0.0\n",
         )
         .unwrap();
-        let out = execute(&df, &config).unwrap();
+        let out = execute(&df, &config, None, None).unwrap();
         assert_eq!(
             out.column("site").unwrap().cells[0],
             Cell::Str("Papworth Everard".into())
@@ -451,7 +495,7 @@ mod tests {
         let df =
             Table::parse_str("imagetyp,sitelat,sitelong,site,bortle,sqm\nLIGHT,1.0,2.0,x,0.0,0.0\n")
                 .unwrap();
-        let out = execute(&df, &config).unwrap();
+        let out = execute(&df, &config, None, None).unwrap();
         assert_eq!(
             out.column("site").unwrap().cells[0],
             Cell::Str("Fallback".into())
@@ -467,7 +511,7 @@ mod tests {
              DARK,,,x,4.0,21.0\n",
         )
         .unwrap();
-        let out = execute(&df, &cfg("[defaults]\nSITE = Home\nBORTLE = 4\nSQM = 21\n")).unwrap();
+        let out = execute(&df, &cfg("[defaults]\nSITE = Home\nBORTLE = 4\nSQM = 21\n"), None, None).unwrap();
         let lat = out.column("sitelat").unwrap();
         assert_eq!(lat.cells[0], lat.cells[1]);
     }

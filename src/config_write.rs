@@ -39,6 +39,7 @@
 //! `configobj` never emits them into a file this splice will later read.
 
 use crate::config::parse_header;
+use crate::numeric::python_repr_f64;
 use anyhow::{Context, Result};
 use std::path::Path;
 
@@ -389,21 +390,6 @@ fn quote_if_needed(s: &str) -> String {
     }
 }
 
-/// Python's `str(float)` / `repr(float)` for the finite, non-scientific
-/// range these values live in: coordinates and Bortle/SQM readings.
-///
-/// Rust's `{}` for `f64` already produces the shortest round-trip decimal,
-/// matching Python's `repr` digit-for-digit for these magnitudes — the one
-/// difference is a whole number: Rust prints `5`, Python `5.0`. `0.0`/`-0.0`
-/// keep the sign Rust already gives them, matching Python.
-fn python_repr_f64(f: f64) -> String {
-    let s = format!("{f}");
-    if s.contains('.') || s.contains('e') || s.contains('E') {
-        s
-    } else {
-        format!("{s}.0")
-    }
-}
 
 #[cfg(test)]
 mod tests {

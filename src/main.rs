@@ -22,6 +22,7 @@ mod numeric;
 mod pathutil;
 mod pandas_fmt;
 mod reports;
+mod sites;
 mod steps;
 mod table;
 mod xisf;
@@ -163,7 +164,30 @@ fn main() -> Result<()> {
         log_info!("main", 277, "Raw scanned headers exported to {path}");
     }
 
-    let agg = match run_pipeline(&raw, &app, Some(out_dir_str.as_str()), args.debug) {
+    // The network layer. `SiteLookup::new` reads `[secret]`; with no such
+    // section `enabled` is false and no socket is ever opened, which is the
+    // ordinary case and what keeps the golden corpus offline.
+    //
+    // `config_path` is None on the --test replay path -- `SessionState(
+    // config_path=None if args.test else args.config)` -- so a diagnostic
+    // run never edits the user's configuration. Note it does not stop the
+    // *lookups*: Python gates only the write, and that is reproduced.
+    let transport = crate::sites::UreqTransport;
+    let lookup = crate::sites::SiteLookup::new(&transport, &app);
+    let config_path = if args.test.is_some() {
+        None
+    } else {
+        Some(args.config.as_path())
+    };
+
+    let agg = match run_pipeline(
+        &raw,
+        &app,
+        Some(out_dir_str.as_str()),
+        args.debug,
+        Some(&lookup),
+        config_path,
+    ) {
         Ok(agg) => agg,
         Err(e) => {
             log_error!(
@@ -390,6 +414,8 @@ fn run_pipeline(
     app: &crate::appconfig::AppConfig,
     out_dir: Option<&str>,
     debug: bool,
+    lookup: Option<&crate::sites::SiteLookup>,
+    config_path: Option<&std::path::Path>,
 ) -> Result<Table> {
     // `PipelineProcessor.add_step`, once per registration, before the run.
     for name in STEP_NAMES {
@@ -508,7 +534,12 @@ fn run_pipeline(
         steps::calibration::execute_labelled(&df, &labels)
     );
     log_debug!("run", 89, "Executing step: {}", STEP_NAMES[4]);
-    let df = step!(5, "GeocodeStep", &df, steps::geocode::execute(&df, app));
+    let df = step!(
+        5,
+        "GeocodeStep",
+        &df,
+        steps::geocode::execute(&df, app, lookup, config_path)
+    );
 
     // The aggregation step is the one place the dump prefers a different
     // frame: `aggregated_df` when it has rows, falling back to the frame that
@@ -552,7 +583,7 @@ fn debug_dump_target<'a>(candidates: &[&'a Table]) -> Option<&'a Table> {
 fn dump_report_stats(cfg: &ConfigFile, args: &Cli) -> Result<()> {
     let raw = load_headers(args, false, None)?;
     let app = crate::appconfig::AppConfig::from_config(cfg)?;
-    let agg = run_pipeline(&raw, &app, None, false)?;
+    let agg = run_pipeline(&raw, &app, None, false, None, None)?;
     for (site, st) in reports::report_temp_stats(&agg) {
         println!(
             "SITE\t{site}\t{}\t{}\t{}\t{}",
@@ -654,7 +685,7 @@ fn dump_steps(cfg: &ConfigFile, args: &Cli) -> Result<()> {
     let df = steps::calibration::execute(&df)?;
     dump::dump_frame("04_CalibrationMatcherStep", &df, &mut out)?;
 
-    let df = steps::geocode::execute(&df, &app)?;
+    let df = steps::geocode::execute(&df, &app, None, None)?;
     dump::dump_frame("05_GeocodeStep", &df, &mut out)?;
 
     // The oracle switches frames for the last step: `AggregationStep` emits

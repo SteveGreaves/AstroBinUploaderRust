@@ -46,6 +46,28 @@ pub fn numpy_round(x: f64, n: u32) -> f64 {
     scaled.round_ties_even() / f
 }
 
+/// Python's `str(float)` / `repr(float)` for the finite, non-scientific range
+/// this program's values live in: coordinates, SQM readings, and the numbers
+/// written into a generated `config.ini`.
+///
+/// Rust's `{}` for `f64` already produces the shortest round-trip decimal,
+/// matching Python's `repr` digit for digit at these magnitudes. The one
+/// difference is a whole number: Rust prints `5`, Python `5.0`. `-0.0` keeps
+/// the sign Rust gives it, which is also what Python prints.
+///
+/// Shared rather than duplicated: `config_write` writes these into the ini
+/// file and `sites` puts them into a request query string and two log
+/// records, and the two must agree.
+pub fn python_repr_f64(f: f64) -> String {
+    let s = format!("{f}");
+    if s.contains('.') || s.contains('e') || s.contains('E') || s.contains("inf") || s.contains("NaN")
+    {
+        s
+    } else {
+        format!("{s}.0")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
