@@ -84,22 +84,22 @@ fn main() -> Result<()> {
     // itself logged -- which is why `load_config` is called below this rather
     // than with the dump paths above.
     logging::init(&out_dir.join("AstroBinUploader.log"), args.debug);
-    log_info!("main", 158, "Logging initialized.");
-    log_info!("main", 163, "main version: {}", env!("CARGO_PKG_VERSION"));
-    log_info!("main", 164, "utils version: {}", env!("CARGO_PKG_VERSION"));
+    log_info!("main", 240, "Logging initialized.");
+    log_info!("main", 245, "main version: {}", env!("CARGO_PKG_VERSION"));
+    log_info!("main", 246, "utils version: {}", env!("CARGO_PKG_VERSION"));
     // `sys.argv` rendered as Python renders a list of strings. It can only
     // ever be *this* program's argv, so argv[0] is the binary rather than a
     // .py file; the shape of the line is what matches, not its first element.
     log_info!(
         "main",
-        165,
+        247,
         "Calling function and arguments provided: [{}]",
         std::env::args()
             .map(|a| format!("'{a}'"))
             .collect::<Vec<_>>()
             .join(", ")
     );
-    log_info!("main", 166, "");
+    log_info!("main", 248, "");
 
     println!("Output directory: {}", out_dir.display());
     // The "legacy-compliant console boot sequence" main() prints verbatim.
@@ -124,7 +124,7 @@ fn main() -> Result<()> {
         let path = pathutil::join(&out_dir_str, "debug_step_00_RawHeaders.csv");
         std::fs::write(&path, exporter::to_csv(&raw))
             .with_context(|| format!("writing {path}"))?;
-        log_info!("main", 195, "Raw scanned headers exported to {path}");
+        log_info!("main", 277, "Raw scanned headers exported to {path}");
     }
 
     let agg = match run_pipeline(&raw, &app, Some(out_dir_str.as_str()), args.debug) {
@@ -132,10 +132,10 @@ fn main() -> Result<()> {
         Err(e) => {
             log_error!(
                 "main",
-                226,
+                315,
                 "The application encountered a fatal error and must exit."
             );
-            log_error!("main", 227, "{e}");
+            log_error!("main", 316, "{e}");
             // main()'s final safety net. The dump is deliberately non-fatal
             // -- it runs while the program is already dying and must never
             // itself raise -- and `--test` is not excluded here, unlike the
@@ -146,7 +146,7 @@ fn main() -> Result<()> {
                     Ok(()) => println!("Emergency data dump saved to: {path}"),
                     Err(err) => {
                         eprintln!("Emergency data dump also failed: {err}");
-                        log_debug!("main", 240, "Emergency data dump also failed: {err}");
+                        log_debug!("main", 329, "Emergency data dump also failed: {err}");
                     }
                 }
             }

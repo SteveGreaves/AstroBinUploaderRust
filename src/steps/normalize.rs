@@ -20,9 +20,14 @@
 //!    (A13 upstream).
 //! 7. Hardening is asymmetric per column: a float list via `astype(float)`,
 //!    `exposure` via pandas `.round(2)`, `gain` via pandas `.round()` then
-//!    `astype(int)`, `number` via `fillna(1).astype(int)`, `site` via
-//!    `astype(str).replace('nan', default)`. Everything else is left alone —
-//!    `foctemp`, `object` and `filter` are core columns but are *not* cast.
+//!    `astype(int)`, `number` via `fillna(1).astype(int)`, `site` and
+//!    `object` via `astype(str).replace('nan', default)`. Everything else is
+//!    left alone — `foctemp` and `filter` are core columns but are *not*
+//!    cast. Seven of these defaults (`gain`, `egain`, `focallen`, `xpixsz`,
+//!    `sitelat`, `sitelong`, `object`) come from `[defaults]` when the
+//!    config actually sets one — Python v2.1.3, `_configured_default` in
+//!    `base.py` — because the hardcoded literal used to win even when a
+//!    frame supplied every *other* header but this one.
 
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
@@ -44,10 +49,10 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
     let mut df = stage4_initial_filter(df);
     let mut df = stage5_master_preference(&mut df)?;
     stage6_normalize_image_type(&mut df);
-    stage7_harden(&mut df);
+    stage7_harden(&mut df, cfg);
     crate::log_debug!(
         "execute",
-        269,
+        308,
         "Completed data type conversion and header normalization"
     );
 
@@ -352,7 +357,7 @@ fn stage5_master_preference(df: &mut Table) -> Result<Table> {
                 Some((d, i)) => {
                     crate::log_debug!(
                         "_execute_master_preference",
-                        370,
+                        409,
                         "Master Preference: {} masters found for group {}; kept the \
                          most recent (DATE-OBS={}).",
                         masters.len(),
@@ -364,7 +369,7 @@ fn stage5_master_preference(df: &mut Table) -> Result<Table> {
                 None => {
                     crate::log_debug!(
                         "_execute_master_preference",
-                        379,
+                        418,
                         "Master Preference: {} masters found for group {} but none had \
                          a usable DATE-OBS; kept the first found under scan order.",
                         masters.len(),
@@ -382,7 +387,7 @@ fn stage5_master_preference(df: &mut Table) -> Result<Table> {
     if dropped > 0 {
         crate::log_debug!(
             "_execute_master_preference",
-            393,
+            432,
             "Master Preference Filter: Dropped {dropped} redundant raw/duplicate \
              calibration frames."
         );
@@ -429,7 +434,7 @@ fn group_key(df: &Table, row: usize, itype: &str) -> Result<GroupKey> {
             if other.is_err() {
                 crate::log_debug!(
                     "get_group_key",
-                    306,
+                    345,
                     "Master preference: unparseable GAIN for {}, using 0 ({})",
                     filename_or_unknown(df, row),
                     crate::steps::python_float_error(cell(col::GAIN)?)
@@ -446,7 +451,7 @@ fn group_key(df: &Table, row: usize, itype: &str) -> Result<GroupKey> {
         Err(()) => {
             crate::log_debug!(
                 "get_group_key",
-                316,
+                355,
                 "Master preference: unparseable EGAIN for {}, using 1.00 ({})",
                 filename_or_unknown(df, row),
                 crate::steps::python_float_error(cell(col::EGAIN)?)
@@ -463,7 +468,7 @@ fn group_key(df: &Table, row: usize, itype: &str) -> Result<GroupKey> {
             Err(()) => {
                 crate::log_debug!(
                     "get_group_key",
-                    335,
+                    374,
                     "Master preference: unparseable DURATION for {}, using 0.00 ({})",
                     filename_or_unknown(df, row),
                     crate::steps::python_float_error(cell(col::DURATION)?)
@@ -627,42 +632,106 @@ enum Harden {
     /// `exposure`: as above but with a pandas `.round(2)` in the middle.
     Exposure,
     /// `gain`: `.round()` then `astype(int)`.
-    Gain,
+    Gain(i64),
     /// `number`: `fillna(1).astype(int)`, preserving master sub-counts.
     Number,
     /// `site`: `astype(str).replace('nan', default)`.
     Site,
+    /// `object`: same idiom as `site`, added alongside the fix below —
+    /// `TARGET` previously had no fillna branch at all (see the module
+    /// doc's stale claim that `object` "is left exactly as found"; it no
+    /// longer is).
+    Target(String),
     /// Present in the core list only so it is created when missing; an
     /// existing column is left exactly as found. The default it would be
     /// created with is the entry's own second field.
     AsFound,
 }
 
+/// The raw uppercase key a `[defaults]` entry would use for one of these
+/// columns, if the user configured one — mirrors `_configured_default` in
+/// `engine/steps/base.py`. Prefers `cfg.defaults` over `fallback`, matching
+/// Python's `int`/`float`/`str` builtins (not `pd.to_numeric`): a value that
+/// doesn't parse as the requested type falls back rather than erroring, the
+/// same as Python's `except (TypeError, ValueError): return fallback`.
+///
+/// GitHub AstroBinUploaderRust — found via the `ic405` fixture (250 raw
+/// DARKFLAT frames, none carrying GPS data): seven columns had a hardcoded
+/// fallback here that disagreed with a configured one (GAIN, EGAIN,
+/// FOCALLEN, XPIXSZ, SITELAT, SITELONG, OBJECT), so a per-cell blank in an
+/// otherwise-populated column silently discarded the user's [defaults]
+/// entry — e.g. a calibration frame with no SITELAT/SITELONG hardened to
+/// 0.0/0.0 instead of the observer's own configured site. Fixed upstream in
+/// Python v2.1.3.
+fn cfg_default_raw(cfg: &AppConfig, raw_key: &str) -> Option<String> {
+    cfg.defaults
+        .iter()
+        .find(|(k, _)| k == raw_key)
+        .map(|(_, v)| v.as_str())
+}
+
+fn cfg_default_float(cfg: &AppConfig, raw_key: &str, fallback: f64) -> f64 {
+    cfg_default_raw(cfg, raw_key)
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .unwrap_or(fallback)
+}
+
+fn cfg_default_int(cfg: &AppConfig, raw_key: &str, fallback: i64) -> i64 {
+    cfg_default_raw(cfg, raw_key)
+        .and_then(|s| s.trim().parse::<i64>().ok())
+        .unwrap_or(fallback)
+}
+
+fn cfg_default_str(cfg: &AppConfig, raw_key: &str, fallback: &str) -> String {
+    cfg_default_raw(cfg, raw_key).unwrap_or_else(|| fallback.to_string())
+}
+
 /// Stage 7 — make sure the core columns exist and carry the expected type.
-fn stage7_harden(df: &mut Table) {
+fn stage7_harden(df: &mut Table, cfg: &AppConfig) {
     crate::log_debug!(
         "execute",
         216,
         "Reducing headers and hardening core column data types"
     );
     use Harden::*;
+
+    // These seven disagree with their hardcoded fallback whenever the user's
+    // config actually defines them — see `cfg_default_raw`'s doc comment.
+    // `FOCALLEN` keeps Python's exact type asymmetry: the *entirely-missing-
+    // column* default stays the bare int 500 when the config doesn't define
+    // FOCALLEN at all (matching `_configured_default`'s `fallback` argument,
+    // which is never passed through `cast`), and only becomes a float once
+    // a configured value exists to cast.
+    let gain_default = cfg_default_int(cfg, "GAIN", 0);
+    let egain_default = cfg_default_float(cfg, "EGAIN", 1.0);
+    let focallen_raw = cfg_default_raw(cfg, "FOCALLEN").and_then(|s| s.trim().parse::<f64>().ok());
+    let focallen_missing = match focallen_raw {
+        Some(v) => Cell::Float(v),
+        None => Cell::Int(500),
+    };
+    let focallen_default = focallen_raw.unwrap_or(500.0);
+    let xpixsz_default = cfg_default_float(cfg, "XPIXSZ", 3.76);
+    let sitelat_default = cfg_default_float(cfg, "SITELAT", 0.0);
+    let sitelong_default = cfg_default_float(cfg, "SITELONG", 0.0);
+    let target_default = cfg_default_str(cfg, "OBJECT", "Unknown");
+
     let core: &[(&str, Cell, Harden)] = &[
-        (col::GAIN, Cell::Int(0), Gain),
-        (col::EGAIN, Cell::Float(1.0), Float(1.0)),
+        (col::GAIN, Cell::Int(gain_default), Gain(gain_default)),
+        (col::EGAIN, Cell::Float(egain_default), Float(egain_default)),
         (col::DURATION, Cell::Float(0.0), Exposure),
         (col::SENSOR_COOLING, Cell::Float(-10.0), Float(-10.0)),
-        (col::FOCAL_LENGTH, Cell::Int(500), Float(500.0)),
+        (col::FOCAL_LENGTH, focallen_missing, Float(focallen_default)),
         (col::F_NUMBER, Cell::Float(5.0), Float(5.0)),
-        (col::PIXEL_SIZE, Cell::Float(3.76), Float(3.76)),
-        (col::SITE_LAT, Cell::Float(0.0), Float(0.0)),
-        (col::SITE_LONG, Cell::Float(0.0), Float(0.0)),
+        (col::PIXEL_SIZE, Cell::Float(xpixsz_default), Float(xpixsz_default)),
+        (col::SITE_LAT, Cell::Float(sitelat_default), Float(sitelat_default)),
+        (col::SITE_LONG, Cell::Float(sitelong_default), Float(sitelong_default)),
         (col::BORTLE, Cell::Float(4.0), Float(4.0)),
         (col::MEAN_SQM, Cell::Float(21.0), Float(21.0)),
         (col::TEMPERATURE, Cell::Float(20.0), AsFound),
         (
             col::TARGET,
-            Cell::Str("Unknown".into()),
-            AsFound,
+            Cell::Str(target_default.clone()),
+            Target(target_default.clone()),
         ),
         (
             col::FILTER_NAME,
@@ -707,7 +776,7 @@ fn stage7_harden(df: &mut Table) {
                     .map(|c| Cell::Float(numpy_round(to_numeric(c).unwrap_or(0.0), 2)))
                     .collect(),
             },
-            Gain => Column {
+            Gain(default) => Column {
                 name: name.to_string(),
                 dtype: DType::Int,
                 cells: column
@@ -716,7 +785,9 @@ fn stage7_harden(df: &mut Table) {
                     // `.round()` then `astype(int)`: the cast truncates
                     // towards zero, which is exact on an already-rounded
                     // value.
-                    .map(|c| Cell::Int(numpy_round(to_numeric(c).unwrap_or(0.0), 0) as i64))
+                    .map(|c| {
+                        Cell::Int(numpy_round(to_numeric(c).unwrap_or(*default as f64), 0) as i64)
+                    })
                     .collect(),
             },
             Number => Column {
@@ -741,6 +812,18 @@ fn stage7_harden(df: &mut Table) {
                         } else {
                             s
                         })
+                    })
+                    .collect(),
+            },
+            Target(default) => Column {
+                name: name.to_string(),
+                dtype: DType::Str,
+                cells: column
+                    .cells
+                    .iter()
+                    .map(|c| {
+                        let s = astype_str(c);
+                        Cell::Str(if s == "nan" { default.clone() } else { s })
                     })
                     .collect(),
             },
@@ -904,7 +987,7 @@ mod tests {
              100.6,600.005,12,,2,20.5\n",
         )
         .unwrap();
-        stage7_harden(&mut df);
+        stage7_harden(&mut df, &config(""));
         assert_eq!(df.column("gain").unwrap().dtype, DType::Int);
         assert_eq!(df.column("gain").unwrap().cells[0], Cell::Int(101));
         assert_eq!(df.column("exposure").unwrap().dtype, DType::Float);
@@ -927,6 +1010,68 @@ mod tests {
             .map(|c| c.name.as_str())
             .collect();
         assert_eq!(tail, vec!["bias", "flatDarks", "flats", "darks"]);
+    }
+
+    #[test]
+    fn a_per_cell_blank_falls_back_to_the_configured_default_not_the_hardcoded_one() {
+        // Two rows: the first supplies every header, so the column exists
+        // and Stage 3's "inject only if the column is wholly missing" never
+        // fires -- exactly the case that discarded the user's config before
+        // this fix. GAIN, SITELAT/SITELONG and OBJECT are three of the
+        // seven affected columns; EGAIN/FOCALLEN/XPIXSZ follow the same
+        // `Float(cfg_default_float(...))` path as SITELAT and aren't
+        // separately pinned here.
+        let mut df = Table::parse_str(
+            "gain,sitelat,sitelong,object\n\
+             100,52.9,-1.2,M 31\n\
+             ,,,\n",
+        )
+        .unwrap();
+        let cfg = config(
+            "[defaults]\nGAIN = -1\nSITELAT = 52.2484\nSITELONG = -0.1231\nOBJECT = No target\n",
+        );
+        stage7_harden(&mut df, &cfg);
+        assert_eq!(df.column("gain").unwrap().cells[1], Cell::Int(-1));
+        assert_eq!(df.column("sitelat").unwrap().cells[1], Cell::Float(52.2484));
+        assert_eq!(df.column("sitelong").unwrap().cells[1], Cell::Float(-0.1231));
+        assert_eq!(
+            df.column("object").unwrap().cells[1],
+            Cell::Str("No target".into())
+        );
+        // The populated row is untouched.
+        assert_eq!(df.column("gain").unwrap().cells[0], Cell::Int(100));
+        assert_eq!(
+            df.column("object").unwrap().cells[0],
+            Cell::Str("M 31".into())
+        );
+    }
+
+    #[test]
+    fn with_no_configured_default_the_hardcoded_literal_still_applies() {
+        let mut df = Table::parse_str("gain,sitelat\n100,52.9\n100,\n").unwrap();
+        stage7_harden(&mut df, &config(""));
+        assert_eq!(df.column("sitelat").unwrap().cells[1], Cell::Float(0.0));
+    }
+
+    #[test]
+    fn focal_length_stays_the_bare_int_default_when_unconfigured_but_a_float_once_configured() {
+        // FOCALLEN's fallback (500) is never passed through Python's `cast`,
+        // so an entirely-missing column takes the literal int; only a
+        // configured value is cast to float. Mirrors `_configured_default`'s
+        // `fallback` argument in `engine/steps/base.py`.
+        let mut without_column = Table::parse_str("gain\n100\n").unwrap();
+        stage7_harden(&mut without_column, &config(""));
+        assert_eq!(
+            without_column.column("focallen").unwrap().cells[0],
+            Cell::Int(500)
+        );
+
+        let mut configured = Table::parse_str("gain\n100\n").unwrap();
+        stage7_harden(&mut configured, &config("[defaults]\nFOCALLEN = 540\n"));
+        assert_eq!(
+            configured.column("focallen").unwrap().cells[0],
+            Cell::Float(540.0)
+        );
     }
 
     #[test]

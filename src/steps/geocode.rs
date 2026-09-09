@@ -60,7 +60,7 @@ fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
     crate::log_info!(
         "execute",
-        72,
+        73,
         "Identifying geographical site data using Smart Proximity Clustering"
     );
     let mut df = table.clone();
@@ -144,7 +144,7 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
             None => {
                 crate::log_debug!(
                     "execute",
-                    171,
+                    192,
                     "Site Cluster {c}: No DB match for averaged coords \
                      ({avg_lat:.4}, {avg_lon:.4}). Used defaults."
                 );
@@ -154,7 +154,7 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
     }
     crate::log_info!(
         "execute",
-        180,
+        210,
         "Consolidated GPS drift into {next_cluster} unique imaging site(s)."
     );
 
