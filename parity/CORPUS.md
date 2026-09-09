@@ -259,6 +259,13 @@ that closed `DARKFLAT`; each is a search that does not need repeating here.
   what remains uncovered is only the blank-filter *flat*, and the data for it
   does not exist here.
 
+- **An unmapped filter name.** Noticed while running the census above, not
+  chased: `golden_config.ini`'s `[filters]` table maps eight names to AstroBin
+  codes, but the library also contains `Lum (UV-IR Block)`, which is not one of
+  them. No fixture carries a filter the config cannot map, so whatever the
+  exporter emits for that case is unverified. Unlike the three gaps above, the
+  data for this one *does* exist here -- it is simply not yet captured.
+
 ## Do not regenerate `fixtures/sadr_raw.csv`
 
 It predates remediation A2 and therefore carries no `SOURCE_PATH` column,
