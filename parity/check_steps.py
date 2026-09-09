@@ -86,6 +86,16 @@ def check_oracle(repo: pathlib.Path) -> list:
         )
 
     upstream = repo / "golden_tests"
+    if not upstream.exists():
+        # golden_tests/ was untracked upstream (test data stays local, not on
+        # GitHub) -- absent here is the policy working as intended, not
+        # drift. Skip the fixture-staleness comparison rather than failing
+        # the whole oracle check over it; the version guard above still runs.
+        print(
+            f"[SKIP] {upstream} not present -- upstream fixture-staleness "
+            f"check skipped (golden_tests/ is local-only by policy)"
+        )
+        return problems
     pairs = [(CONFIG, upstream / "golden_config.ini")]
     pairs += [(f, upstream / "fixtures" / f.name) for _, f in UPSTREAM_FIXTURES]
     for ours, theirs in pairs:
