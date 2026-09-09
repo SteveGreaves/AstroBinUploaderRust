@@ -135,7 +135,8 @@ The differences are these, and they are all deliberate.
 | **Unknown observing site** | With `[secret]`, looks the coordinates up online (OpenStreetMap for the address, lightpollutionmap.info for Bortle/SQM) and saves the result to `[sites]` | No network code at all; `[secret]` is ignored and `[defaults]` is used. Run the Python utility once to add a new site |
 | **Installing** | Python 3.x, then `pip install -r requirements.txt` | Nothing. One executable. |
 | **Calling it** | `astrobin-upload "dir"` | `astrobin-upload "dir"` |
-| **First run** | Called with no arguments, writes a default `config.ini` and exits | Copy `config.ini.example` to `config.ini` yourself; a missing config is an error |
+| **First run** | Called with no arguments, writes a default `config.ini` and exits | Same |
+| **No directory given, `config.ini` already exists** | Prints a message and argparse's usage line, then exits | Same message; the usage line is this program's own — every flag on one line rather than argparse's wrapped, fully-enumerated form |
 | **`~` in a path** | Expanded by the program, so `"~/Astro/M31"` works quoted | Left to the shell; use `$HOME/Astro/M31` or an unquoted `~` |
 | **Log: the command line** | `Calling function and arguments provided:` names `AstroBinUpload.py` | Names the executable. Nothing else can be true of a compiled program |
 | **Log: a fatal error** | A full Python traceback | The failing step and its error message |
@@ -147,11 +148,10 @@ came from, because that is what a reader comparing the two logs expects to
 see. Only the timestamps differ, and those differ between two runs of the
 Python utility as well.
 
-Two of the Python program's records have no counterpart here and are never
-written: the one announcing that a default `config.ini` has been generated
-(this edition does not generate one), and one reporting a coordinate-alignment
-failure that this edition's alignment cannot suffer. The other 83 are all
-present.
+One of the Python program's records has no counterpart here and is never
+written: one reporting a coordinate-alignment failure that this edition's
+alignment cannot suffer. The other 84 are all present, including the one
+announcing that a default `config.ini` was generated.
 
 ### About the screenshots
 
@@ -200,24 +200,24 @@ same reason — the executable is not code-signed. Choose *More info → Run any
 
 ### **Creating your config.ini**
 
-The utility needs a `config.ini` and **will not create one for you** — this is
-the one place where it deliberately behaves differently from the Python
-original, which generates a default file on its first run. Instead, a
-`config.ini.example` is supplied in the archive.
+The utility needs a `config.ini`. Run it once with no arguments in the
+directory you intend to work from, and it writes a default one and exits —
+the same first-run behaviour as the Python original:
 
-Copy it, then edit your copy:
+    astrobin-upload
 
-    cp config.ini.example config.ini        # Linux / macOS
-    copy config.ini.example config.ini      # Windows
+    A new config.ini file was created. Please edit this before re-running the script.
 
 `config.ini` is looked for in the directory you run the utility *from*, not the
-directory the executable lives in. If it is missing, the utility reports
+directory the executable lives in. A `config.ini.example` is also supplied in
+the archive if you would rather copy it by hand or keep several named
+profiles ready to switch between.
 
-        Error: configuration file not found: config.ini
-
-and stops, rather than guessing at defaults that would quietly produce wrong
-acquisition data. A description of every parameter in the file is given below.
-Once you have personalised it, make a backup.
+If `config.ini` already exists and you run the utility with no directory
+argument, it tells you so and exits rather than regenerating over your
+edits — give it one or more directories to scan instead. A description of
+every parameter in the file is given below. Once you have personalised it,
+make a backup.
 
 ### **Using Alternative Configuration Files**
 
@@ -428,11 +428,12 @@ The [override] section provides a translation layer that allows you to map non-s
 
 The utility is called from the command line. There are two calling methods.
 
-Called with no arguments it prints its usage and exits — unlike the Python
-utility, it does not generate a `config.ini` for you. Copy
-`config.ini.example` to `config.ini` yourself, as described in
-[Creating your config.ini](#creating-your-configini), and keep a backup once
-you have personalised it.
+Called with no arguments and no existing `config.ini`, it writes a default
+one and exits — the same first-run behaviour as the Python utility. See
+[Creating your config.ini](#creating-your-configini) for what to edit before
+your first real run, and keep a backup once you have personalised it. Called
+with no arguments when `config.ini` already exists, it prints a message and
+its usage and exits: give it one or more directories to scan.
 
 ### **A single directory path or symbolic link**
 
@@ -635,10 +636,12 @@ cannot occur. What can:
   archive matching your machine — Apple Silicon Macs need `aarch64-apple-darwin`,
   Intel Macs `x86_64-apple-darwin`.
 
-### **"configuration file not found: config.ini"**
+### **"The specified configuration file '...' was not found."**
 
-The utility does not create one. Copy `config.ini.example` to `config.ini` in
-the directory you are running from, or point at one with `--config`.
+Only the default `config.ini` is ever generated automatically. If you named a
+different file with `--config` and it does not exist, create it yourself —
+copy `config.ini.example` or an existing profile, or point `--config` at the
+right path.
 
 ### **A path starting with `~` is not found**
 

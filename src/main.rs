@@ -27,7 +27,7 @@ mod table;
 mod xisf;
 
 use anyhow::{bail, Context, Result};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 use crate::cli::Cli;
 use crate::config::ConfigFile;
@@ -35,6 +35,41 @@ use crate::table::Table;
 
 fn main() -> Result<()> {
     let args = Cli::parse();
+
+    // Step 0 -- first-run configuration bootstrap (AstroBinUpload.py's
+    // `main`, restored in v2.2.0). Running with no directory paths at all
+    // generates a default config.ini and exits, so a brand-new user has
+    // something to edit. Runs before any path-dependent setup, exactly as
+    // on the Python side; see PORT_PLAN.md Phase 7C.
+    if args.directory_paths.is_empty() {
+        if args.config.exists() {
+            println!(
+                "\nNo directory path provided, and '{}' already exists.\n\
+                 Give one or more directories to scan.\n",
+                args.config.display()
+            );
+            // Deliberately not byte-parity with `parser.print_usage()`:
+            // argparse enumerates every flag across several wrapped lines;
+            // clap collapses to `[OPTIONS]`. Reimplementing argparse's
+            // formatter isn't worth it for one usage line -- recorded in
+            // packaging/README.md's differences section rather than hidden
+            // behind a claim this matches.
+            print!("{}", Cli::command().render_usage());
+            println!();
+            std::process::exit(1);
+        }
+        if args.config != std::path::Path::new("config.ini") {
+            // Only the default name is ever generated; a named profile
+            // that is missing is a mistake, not a request to create one.
+            println!(
+                "\nThe specified configuration file '{}' was not found.\n",
+                args.config.display()
+            );
+            std::process::exit(1);
+        }
+        generate_default_config(&args.config)?;
+        std::process::exit(0);
+    }
 
     // B10 in REMEDIATION_PLAN.md: the Python side validates directory
     // arguments before use, because an unvalidated typo reached
@@ -116,7 +151,7 @@ fn main() -> Result<()> {
     // constructor runs inside `ConfigLoader.load`, so the warnings its
     // normalisers emit land before the scan's records, not after them.
     let app = crate::appconfig::AppConfig::from_config(&cfg)?;
-    let raw = load_headers(&args, true)?;
+    let raw = load_headers(&args, true, Some(out_dir_str.as_str()))?;
 
     // Written only on the scan path: the export sits in the `else` branch of
     // `if args.test`, so an injected run -- which was fed one of these files
@@ -166,21 +201,37 @@ fn main() -> Result<()> {
 
 /// `ConfigLoader.load`.
 ///
-/// Unlike Python, a missing config is an error rather than a prompt to
-/// generate a template: template generation is an interactive convenience
-/// that has no place in a binary the differential harness drives. The
-/// `logger.error` for a missing *custom* config is Python's own.
+/// Reachable with a missing `config.ini` even when directory paths *were*
+/// given: Python's own generation branch lives here, inside `load`, not
+/// only in `main`'s Step-0 bootstrap -- so a user who deletes `config.ini`
+/// and reruns with real arguments gets a freshly generated template and a
+/// clean exit(0), same as an argument-less first run, except that logging
+/// is already initialised by the time this fires, so the
+/// `config.ini missing...` record actually lands (loader.py:62; the Step-0
+/// bootstrap's call to the same generator runs before a log sink exists,
+/// matching Python's own logger-has-no-handlers-yet comment).
 fn load_config(args: &Cli) -> Result<ConfigFile> {
     if !args.config.exists() {
+        if args.config == std::path::Path::new("config.ini") {
+            generate_default_config(&args.config)?;
+            std::process::exit(0);
+        }
         log_error!(
             "load",
             68,
             "Custom configuration file missing: {}",
             args.config.display()
         );
+        // Text matches Python's own exception message, but the surrounding
+        // handling is pre-existing and still diverges, not something this
+        // phase touches: Python's `try:` wraps `loader.load(...)` too, so
+        // this failure reaches the `main:315`/`316` fatal-error log records
+        // (and, when directory paths were given, the emergency dump check).
+        // Here it propagates straight out of `main` via `?`, skipping both.
+        // No fixture exercises a missing config, so no harness catches the
+        // gap; see PORT_PLAN.md's Phase 7 pending list.
         bail!(
-            "configuration file not found: {} (the Rust port does not \
-             auto-generate one; use the Python entry point for that)",
+            "The specified configuration file '{}' was not found.",
             args.config.display()
         );
     }
@@ -195,12 +246,33 @@ fn load_config(args: &Cli) -> Result<ConfigFile> {
     Ok(cfg)
 }
 
+/// `ConfigLoader.load`'s generation branch (loader.py:61-65), shared by
+/// `main`'s Step-0 bootstrap (no directory paths; logger not yet
+/// initialised, so this call's `log_info!` is a silent no-op, matching
+/// Python's unhandled logger there) and `load_config` above (directories
+/// given, but the default `config.ini` happens to be missing -- logging
+/// already initialised, so the record lands for real).
+fn generate_default_config(path: &std::path::Path) -> Result<()> {
+    log_info!(
+        "load",
+        62,
+        "config.ini missing. Generating default configuration template."
+    );
+    config_write::write_default_config(path)
+        .with_context(|| format!("writing generated config to {}", path.display()))?;
+    println!(
+        "\nA new {} file was created. Please edit this before re-running the script.",
+        path.display()
+    );
+    Ok(())
+}
+
 /// The raw header frame: injected from a CSV, or scanned off disk.
 ///
 /// The two build their frames by different rules -- see `extractor.rs`'s
 /// table -- so which one ran is visible in the result, not just in how it got
 /// there.
-fn load_headers(args: &Cli, announce: bool) -> Result<Table> {
+fn load_headers(args: &Cli, announce: bool, out_dir: Option<&str>) -> Result<Table> {
     if announce {
         // Printed before the `if args.test` branch on the Python side, so an
         // injected run announces the read it is not doing too. Suppressed in
@@ -209,13 +281,23 @@ fn load_headers(args: &Cli, announce: bool) -> Result<Table> {
     }
     match args.test.as_deref() {
         Some(csv) => {
+            // `resolve_test_csv` is the real pipeline's behaviour
+            // (AstroBinUpload.py's `main`); the hidden dump_* paths pass
+            // `out_dir: None` and read the given path directly, as before --
+            // they are not part of Python's CLI surface, so they have no
+            // `output_dir` to resolve against and no reason to grow one.
+            let resolved = match out_dir {
+                Some(out_dir) => resolve_test_csv(&csv.to_string_lossy(), out_dir),
+                None => csv.to_string_lossy().into_owned(),
+            };
             log_info!(
                 "extract_from_csv",
                 148,
                 "Injecting metadata from CSV: {}",
-                csv.display()
+                resolved
             );
-            Table::read_csv_upper(csv).with_context(|| format!("ingesting {}", csv.display()))
+            Table::read_csv_upper(std::path::Path::new(&resolved))
+                .with_context(|| format!("ingesting {resolved}"))
         }
         None => {
             // `[os.path.abspath(os.path.expanduser(p)) for p in ...]`: the
@@ -231,6 +313,66 @@ fn load_headers(args: &Cli, announce: bool) -> Result<Table> {
             extractor::extract_from_directories(&paths, announce)
         }
     }
+}
+
+/// `resolve_test_csv` (AstroBinUpload.py). Two locations, in order:
+///
+/// 1. Inside `output_dir` -- `<first directory>/AstroBinUploadInfo` -- where
+///    a `--debug` run writes `debug_step_00_RawHeaders.csv` and a crash
+///    writes `emergency_raw_dump.csv`. A bare filename replays your own
+///    debug run.
+/// 2. The path exactly as given, resolved from the current directory or as
+///    an absolute path -- what every earlier release accepted, and the form
+///    that matters for a CSV that came from somewhere else entirely.
+///
+/// An absolute `given` satisfies both, since `pathutil::join` (like
+/// `os.path.join`) discards `output_dir` when `given` is absolute.
+///
+/// Exits the process with the same three-line diagnostic Python prints when
+/// neither candidate exists, rather than returning an error: this mirrors
+/// `sys.exit(1)` inside a helper function, which `anyhow::Result` has no
+/// clean way to express short of the same hard exit.
+fn resolve_test_csv(given: &str, output_dir: &str) -> String {
+    let candidates = test_csv_candidates(given, output_dir);
+    for candidate in &candidates {
+        if std::path::Path::new(candidate).is_file() {
+            return candidate.clone();
+        }
+    }
+
+    println!("\n[ERROR] --test file not found: {given}");
+    println!("Looked in both:");
+    for candidate in unique_in_order(&candidates) {
+        println!("  {}", pathutil::abspath(candidate));
+    }
+    println!(
+        "\nPass either the bare filename of a CSV inside AstroBinUploadInfo, \
+         or a path to one elsewhere.\n"
+    );
+    std::process::exit(1);
+}
+
+/// `[os.path.join(output_dir, given), given]` — pure, so the
+/// absolute-path collapse (`pathutil::join` discards `output_dir` when
+/// `given` is absolute, exactly like `os.path.join`) is testable without
+/// the `process::exit` that makes `resolve_test_csv` itself untestable on
+/// the not-found path.
+fn test_csv_candidates(given: &str, output_dir: &str) -> [String; 2] {
+    [pathutil::join(output_dir, given), given.to_string()]
+}
+
+/// `dict.fromkeys(candidates)`: first-seen order, duplicates dropped. Used
+/// only for the "Looked in both:" listing — an absolute `given` collapses
+/// both candidates to the same string, and Python prints it once, not
+/// twice.
+fn unique_in_order(items: &[String]) -> Vec<&String> {
+    let mut seen = Vec::with_capacity(items.len());
+    for item in items {
+        if !seen.contains(&item) {
+            seen.push(item);
+        }
+    }
+    seen
 }
 
 /// The six steps, in the order `PipelineProcessor` runs them.
@@ -408,7 +550,7 @@ fn debug_dump_target<'a>(candidates: &[&'a Table]) -> Option<&'a Table> {
 /// The summary's temperature statistics, one line per site, as raw IEEE-754
 /// bits — the same little-endian hex `dump.rs` uses for float cells.
 fn dump_report_stats(cfg: &ConfigFile, args: &Cli) -> Result<()> {
-    let raw = load_headers(args, false)?;
+    let raw = load_headers(args, false, None)?;
     let app = crate::appconfig::AppConfig::from_config(cfg)?;
     let agg = run_pipeline(&raw, &app, None, false)?;
     for (site, st) in reports::report_temp_stats(&agg) {
@@ -493,7 +635,7 @@ fn dump_parity(cfg: &ConfigFile, test_csv: Option<&std::path::Path>) -> Result<(
 fn dump_steps(cfg: &ConfigFile, args: &Cli) -> Result<()> {
     use std::io::Write;
 
-    let raw = load_headers(args, false)?;
+    let raw = load_headers(args, false, None)?;
     let app = crate::appconfig::AppConfig::from_config(cfg)?;
 
     let stdout = std::io::stdout();
@@ -549,5 +691,38 @@ mod tests {
         assert_eq!(debug_dump_target(&[&empty, &other]).unwrap().n_rows, 7);
         assert!(debug_dump_target(&[&empty, &empty]).is_none());
         assert!(debug_dump_target(&[]).is_none());
+    }
+
+    /// `resolve_test_csv`'s candidate construction (AstroBinUpload.py) --
+    /// the part that can be unit-tested without the `process::exit` on its
+    /// not-found path.
+    #[test]
+    fn candidates_are_output_dir_join_then_given_as_is() {
+        assert_eq!(
+            test_csv_candidates("replay.csv", "/scan/AstroBinUploadInfo"),
+            [
+                "/scan/AstroBinUploadInfo/replay.csv".to_string(),
+                "replay.csv".to_string()
+            ]
+        );
+    }
+
+    /// An absolute `given` makes `os.path.join` (and `pathutil::join`)
+    /// discard `output_dir` entirely, so both candidates collapse to the
+    /// same string. Verified against live Python 2026-09-09: the not-found
+    /// diagnostic then prints exactly one path under "Looked in both:",
+    /// not two.
+    #[test]
+    fn an_absolute_given_path_collapses_both_candidates() {
+        let candidates = test_csv_candidates("/nope/absent.csv", "/scan/AstroBinUploadInfo");
+        assert_eq!(candidates, ["/nope/absent.csv", "/nope/absent.csv"]);
+        assert_eq!(unique_in_order(&candidates).len(), 1);
+    }
+
+    #[test]
+    fn unique_in_order_keeps_first_seen_order_and_drops_repeats() {
+        let items = vec!["a".to_string(), "b".to_string(), "a".to_string()];
+        let deduped: Vec<&String> = unique_in_order(&items);
+        assert_eq!(deduped, vec!["a", "b"]);
     }
 }
