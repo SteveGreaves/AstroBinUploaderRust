@@ -1,0 +1,16 @@
+# The parity corpus is compared byte for byte, so git must not rewrite any of
+# it on checkout. On Windows, `core.autocrlf=true` is the default from Git for
+# Windows' installer, and it would convert every LF in these files to CRLF --
+# after which the binary (Rust's `writeln!` emits LF on every platform) differs
+# from its own reference on every single line, for a reason that has nothing to
+# do with the port. `-text` disables that conversion in both directions.
+#
+# parity/check_release.py detects the symptom and says so, but not converting
+# is better than diagnosing afterwards.
+parity/references/**   -text
+parity/fixtures/**     -text
+parity/golden_config.ini -text
+
+# Truncated FITS and XISF frames: real binary content, never line-ending
+# material, and not worth attempting to diff as text.
+parity/fixtures/binary/**  binary
