@@ -18,8 +18,8 @@ listed under
 
 ## **Contents**
 
-- - [Features](#features)   
-- [Prerequisites](#prerequisites)    
+- [Features](#features)
+- [Pre-requisites](#pre-requisites)
     - [Installing the executable](#installing-the-executable)
     - [Creating your config.ini](#creating-your-configini)
     - [Using Alternative Configuration Files](#using-alternative-configuration-files)
@@ -28,29 +28,30 @@ listed under
         - [[filters]](#filters)
         - [[secret]](#secret)
         - [[sites]](#sites)
-        - [[override]](#override) 
+        - [[override]](#override)
         - [[equipmentoverrides]](#equipmentoverrides)
-        - [Editing the initial config.ini](#editing-the-initial-configini)
+        - [Editing the config.ini](#editing-the-configini)
 - [Differences from the Python utility](#differences-from-the-python-utility)
 - [Running the utility](#running-the-utility)
-    - [Single directory or symbolic link](#a-single-directory-path-or-symbolic-link-argument-is-passed-to-the-script)
+    - [A single directory path or symbolic link](#a-single-directory-path-or-symbolic-link)
     - [Multiple directory paths or symbolic links](#multiple-directory-paths-or-symbolic-links)
     - [Advanced Debugging and Testing](#advanced-debugging-and-testing)
 - [Example calls and outputs](#example-calls-and-outputs)
-    - [Example 1: Single site, non-mosaic](#example-1-single-site-non-mosaic-no-masters-data-resides-in-structured-single-directory-symbolic-links-used-for-calibration-data)
-    - [Example 2: Single site, 2 panel mosaic](#example-2-single-site-2-panel-mosaic-symbolic-links-to-calibration-data-use-of-masterflats)
-    - [Example 3: Dual site, structured directory](#example-3-dual-site-structured-directory-2-panel-mosaic-use-of-mastercals)
+    - [Example 1: Single site, non-mosaic](#example-1-single-site-non-mosaic)
+    - [Example 2: Single site, 2 panel mosaic](#example-2-single-site-2-panel-mosaic)
+    - [Example 3: Dual site, structured directory](#example-3-dual-site-structured-directory)
     - [Example 4: WBPP two-panel mosaic](#example-4-wbpp-two-panel-mosaic)
 - [Troubleshooting](#troubleshooting)
-- [References](#references)   
+- [References](#references)
     - [AstroBin's Acquisition CSV File Format](#astrobins-acquisition-csv-file-format)
-        - [AstroBin's Long Exposure Acquisition Fields](#astrobin-long-exposure-acquisition-fields)
+        - [AstroBin Long Exposure Acquisition Fields](#astrobin-long-exposure-acquisition-fields)
     - [Astrobin Filter-Code mappings](#astrobin-filter-code-mappings)
-        - [Finding the AstroBin's Numeric ID for Filters](#finding-astrobins-numeric-id-for-filters)
+        - [Finding AstroBin's Numeric ID for Filters](#finding-astrobins-numeric-id-for-filters)
     - [Sky quality (Bortle and SQM)](#sky-quality-bortle-and-sqm)
     - [Site names and reverse geocoding](#site-names-and-reverse-geocoding)
-    - [FWHM values](#fwhm-values)
-    - [Data Sources](#data-sources )
+    - [FWHM Values](#fwhm-values)
+    - [Data Sources](#data-sources)
+- [Building from source](#building-from-source)
 - [Contributing](#contributing)
 - [Contact](#contact)
 - [Licence](#licence)
@@ -81,7 +82,7 @@ Key features include:
 
     where x is the panel number. N.I.N.A does this automatically but in Sequence Generator Pro the user will have to edit the directory name in Target Settings before starting the sequence.
 
-- **Multiple site support**: Multi-site collaborative target acquisition or remote observatory image capture is supported. Site locations are recognised from the coordinates in the headers: readings are clustered and matched against the `[sites]` section of your `config.ini`. A cluster with no match is looked up online — see [Sky quality and site naming](#sky-quality-and-site-naming) — and the result is saved back to `[sites]`, so a site is looked up once and never again. Data from multiple sites is reported with summary outputs that correctly identify the site contribution, for instance equipment, LIGHT, and calibration data. All data is, however, aggregated in the AstroBin.csv file for the image target.
+- **Multiple site support**: Multi-site collaborative target acquisition or remote observatory image capture is supported. Site locations are recognised from the coordinates in the headers: readings are clustered and matched against the `[sites]` section of your `config.ini`. A cluster with no match is looked up online — see [Sky quality (Bortle and SQM)](#sky-quality-bortle-and-sqm) and [Site names and reverse geocoding](#site-names-and-reverse-geocoding) — and the result is saved back to `[sites]`, so a site is looked up once and never again. Data from multiple sites is reported with summary outputs that correctly identify the site contribution, for instance equipment, LIGHT, and calibration data. All data is, however, aggregated in the AstroBin.csv file for the image target.
 
 - **Support for multiple file formats**: Extracts headers for all FITS/FIT/FTS/XISF files in specified directories. Directories can have a mix of files. 
 
@@ -128,8 +129,8 @@ The differences are these, and they are all deliberate.
 | | Python utility | This edition |
 |---|---|---|
 | **Unknown observing site, online lookup** | `requests` + `geopy`'s Nominatim client, via whatever TLS stack Python was built against | `ureq` with rustls and bundled root certificates — no system OpenSSL or CA store needed on any platform, which keeps the single-binary premise on Linux in particular |
-| **Installing** | Python 3.x, then `pip install -r requirements.txt` | Nothing. One executable. |
-| **Calling it** | `astrobin-upload "dir"` | `astrobin-upload "dir"` |
+| **Installing** | Python 3.10+, then a virtual environment and `.venv/bin/pip install -r requirements.txt` | Nothing. Download one executable. |
+| **Calling it** | `.venv/bin/python3 AstroBinUpload.py "dir"` | `astrobin-upload "dir"` |
 | **First run** | Called with no arguments, writes a default `config.ini` and exits | Same |
 | **No directory given, `config.ini` already exists** | Prints a message and argparse's usage line, then exits | Same message; the usage line is this program's own — every flag on one line rather than argparse's wrapped, fully-enumerated form |
 | **`~` in a path** | Expanded by the program, so `"~/Astro/M31"` works quoted | Left to the shell; use `$HOME/Astro/M31` or an unquoted `~` |
@@ -156,9 +157,24 @@ what you see on screen and in the files is what this edition produces.
 
 ## **Pre-requisites**
 
-None. This edition is a single self-contained executable — there is no Python
-to install, no `pip`, no libraries and no shared-library dependencies. It runs
-on Windows, Linux and macOS, on both Intel/AMD and ARM processors.
+None to speak of. This edition is a single self-contained executable — there
+is no Python to install, no `pip`, no libraries, and no build toolchain. It
+runs on Windows, Linux and macOS, on both Intel/AMD and ARM processors.
+
+- **No installer and no administrator rights.** The program is one file. Put
+  it anywhere you can write to and run it from there.
+- **No system libraries.** The Linux build is statically linked against musl,
+  so it has no glibc or distribution version requirement and runs on any
+  Linux from the last decade. The Windows and macOS builds use only what the
+  operating system already ships.
+- **No network unless you ask for one.** Every offline path runs with no
+  connection at all. A connection is used only when you have filled in
+  `[secret]` in `config.ini` and a site is not already known — see
+  [[secret]](#secret) and [Sky quality (Bortle and SQM)](#sky-quality-bortle-and-sqm).
+  TLS and the root certificates are built into the binary, so no system CA
+  store is needed.
+- **Disk space.** The extracted archive is a few megabytes. Output is written
+  next to your data in an `AstroBinUploadInfo` folder.
 
 ### **Installing the executable**
 
@@ -315,7 +331,7 @@ A config.ini file with an explanation of the sections is given below:
 ```
 [defaults]
         IMAGETYP = LIGHT
-        EXPOSURE = 0
+        EXPOSURE = 0.0
         DATE-OBS = 2023-01-01
         XBINNING = 1
 ```
@@ -333,18 +349,18 @@ If you have a CCD camera, leave these values as they are. If you have a CMOS cam
         FWHEEL = None
         ROTNAME = None
         ROTANTANG = 0
-        XPIXSZ = 3
+        XPIXSZ = 3.76
         CCD-TEMP = -10
-        FOCALLEN = 540
-        FOCRATIO = 5
+        FOCALLEN = 500
+        FOCRATIO = 5.0
 ```
-This is where default the equipment configuration. Again the utility should be able to populate these parameters from the header information. XPIXSZ is the X-pixel size in um and is used to represent the sensor pixel size in the utility.
+This is the default equipment configuration. Again the utility should be able to populate these parameters from the header information. XPIXSZ is the X-pixel size in um and is used to represent the sensor pixel size in the utility.
 ```
-        SITE = My Site Name
-        SITELAT = 0.0000
-        SITELONG = 0.0000
+        SITE = Unknown Site
+        SITELAT = 0.0
+        SITELONG = 0.0
         BORTLE = 4
-        SQM = 21
+        SQM = 21.0
 ```
 You should modify these parameters to reflect your own site. They are the fallback used whenever a frame's coordinates match no entry in [sites]
 
@@ -361,7 +377,7 @@ If you use a color camera and don't report your filters automatically you should
 These are place-holders and should not be required as they should be populated by the capture software
 
 ```
-        HFR = 1
+        HFR = 1.6
 ```
 You should set this value to the typical value for your imaging train. If you use N.I.N.A you can add the measured HFR for the image to the file name. The utility looks for HFR=X.XX in the image file name and if present uses the value found, if HFR is not in the image file name the utility falls back to this value.
 ```
@@ -369,9 +385,9 @@ You should set this value to the typical value for your imaging train. If you us
 ```
 This is a place-holder and should not be required, it should be created by the capture software.
 ```
-        USEOBSDATE = False
+        USEOBSDATE = True
 ```
-USEOBSDATE if set to True the actual date of the observation session is used when aggregating data for the astrobin acqusition.csv output. If this prameter is set to False then, per session, the date the observation session was started is used. 
+USEOBSDATE, if set to True, aggregates data for the AstroBin acquisition.csv output by each frame's own calendar date. If set to False, frames taken after midnight are counted with the session that started the previous evening. 
 ```
 
 
@@ -504,12 +520,19 @@ The log file also includes a **Horizontal Header Echo**, which prints the full r
 
 ## **Diagnostic Mode**
 
-The `--test` flag allows developers and users to troubleshoot issues using a `.csv` file (typically `basic_headers.csv` generated via the `--debug` run) without needing access to the raw FITS data. This ensures consistent logic verification across different environments.
+The `--test` flag re-runs the whole pipeline from a `.csv` of already-extracted
+headers — normally `debug_step_00_RawHeaders.csv`, written into
+`AstroBinUploadInfo` by a `--debug` run — instead of scanning the disk. It
+produces exactly the same outputs, so a problem can be reproduced without
+access to the original FITS data.
 
-Example usage:
-`astrobin-upload "/path/to/data" --test "basic_headers.csv"`
+    astrobin-upload "/path/to/data" --test debug_step_00_RawHeaders.csv
 
-**Note:** The CSV file must reside within the first directory provided in the command line arguments.
+See [Using the Diagnostic Test Mode](#2-using-the-diagnostic-test-mode---test)
+above for the supported files and where the CSV is looked for: a bare filename
+is resolved first inside the run's `AstroBinUploadInfo` directory, then at the
+path as given.
+
 <div style="page-break-after: always;"></div>
 
 # **Example calls and outputs**
@@ -525,9 +548,9 @@ Example usage:
 
 ### Example 1: Script calling syntax
 
-The output files being named:     
+The output files being named:
 - Sadr_Region_session_summary.txt
-- Sadr_Region_aquisition.csv  
+- Sadr_Region_acquisition.csv
 
 
 <div style="page-break-after: always;"></div>
@@ -722,7 +745,7 @@ The contents of my [filters] section is given below. It shows the names my Astro
 | Lum        | 2906     |
 | CLS        | 4061     |
 
-This is the default filter table in the config.ini. You should this section so that it reflects the filters you use. The filter names should match the names the image capture software generates for your filters.
+This is the default filter table in the config.ini. You should edit this section so that it reflects the filters you use. The filter names should match the names the image capture software generates for your filters.
 
 ### **Finding AstroBin's Numeric ID for Filters**
 
@@ -829,6 +852,19 @@ install. XISF headers are read per the
 [Pixinsight XISF header specification](https://pixinsight.com/doc/docs/XISF-1.0-spec/XISF-1.0-spec.html#xisf_header).
 
 
+## **Building from source**
+
+Released binaries cover every common platform, so most users never need this.
+If you want to build your own, install a recent stable Rust toolchain from
+<https://rustup.rs> and run:
+
+    cargo build --release        # target/release/astrobin-upload
+    cargo test                   # the unit-test suite
+
+The only build-time requirement is the Rust toolchain itself — there is no C
+library to find or link (the FITS reader is hand-written), which is what lets
+the result ship as a single file.
+
 ## **Contributing**
 
 This program is intended for educational purposes in the field of
@@ -850,6 +886,6 @@ Alternatively, see the GitHub documentation on [creating a pull request](https:/
 
 If you want to contact me, you can reach me at sgreaves139@gmail.com.
 
-## **License**
+## **Licence**
 
-This project uses the following licence: [GNU General Public Licence v3.0](https://github.com/SteveGreaves/AstroBinUploader/blob/main/LICENSE).
+This project uses the following licence: [GNU General Public Licence v3.0](https://github.com/SteveGreaves/AstroBinUploaderRust/blob/main/LICENSE).
