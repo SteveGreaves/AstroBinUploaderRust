@@ -1,20 +1,15 @@
-# AstroBin Upload Utility v2.2.1 — Rust edition
+# AstroBin Upload Utility v2.2.1
 
-A single self-contained executable that processes FITS/XISF headers and creates
-the AstroBin data acquisition file and summary text. No Python, no libcfitsio,
-no libraries to install.
+`astrobin-upload` is a single self-contained executable that reads the FITS and
+XISF headers from a directory of astrophotography frames and produces the
+acquisition CSV and session summary that [AstroBin](https://www.astrobin.com)'s
+bulk import expects.
+
+There is nothing to install: one file, no runtime, no libraries, no build
+tools. It runs on Windows, Linux and macOS, on Intel/AMD and ARM.
 
 Usage:
 `astrobin-upload [directory_paths] [--config config_file]`
-
-This is a port of [AstroBinUploader](https://github.com/SteveGreaves/AstroBinUploader)
-and its output is byte-for-byte identical to that utility at v2.2.0 — the same
-CSV, the same summary, to the last digit and trailing space, including its
-restored online site lookup. Everything this document says about *what the
-program does* therefore applies to both; the sections that differ are
-installation, how you call it, and the handful of deliberate differences
-listed under
-[Differences from the Python utility](#differences-from-the-python-utility).
 
 ## **Contents**
 
@@ -31,7 +26,6 @@ listed under
         - [[override]](#override)
         - [[equipmentoverrides]](#equipmentoverrides)
         - [Editing the config.ini](#editing-the-configini)
-- [Differences from the Python utility](#differences-from-the-python-utility)
 - [Running the utility](#running-the-utility)
     - [A single directory path or symbolic link](#a-single-directory-path-or-symbolic-link)
     - [Multiple directory paths or symbolic links](#multiple-directory-paths-or-symbolic-links)
@@ -114,52 +108,11 @@ Key features include:
 
 <div style="page-break-after: always;"></div>
 
-# **Differences from the Python utility**
-
-Everything this program *produces* is byte-for-byte identical to
-AstroBinUploader v2.2.0: the acquisition CSV, the session summary, the
-`debug_step_*.csv` files, and the console output — including its restored
-online site lookup, given the same `config.ini`. That is checked
-automatically, on every change, by running both programs side by side and
-comparing the results byte for byte, both offline (no `[secret]` configured)
-and online, against the same coordinates and the same live services.
-
-The differences are these, and they are all deliberate.
-
-| | Python utility | This edition |
-|---|---|---|
-| **Unknown observing site, online lookup** | `requests` + `geopy`'s Nominatim client, via whatever TLS stack Python was built against | `ureq` with rustls and bundled root certificates — no system OpenSSL or CA store needed on any platform, which keeps the single-binary premise on Linux in particular |
-| **Installing** | Python 3.10+, then a virtual environment and `.venv/bin/pip install -r requirements.txt` | Nothing. Download one executable. |
-| **Calling it** | `.venv/bin/python3 AstroBinUpload.py "dir"` | `astrobin-upload "dir"` |
-| **First run** | Called with no arguments, writes a default `config.ini` and exits | Same |
-| **No directory given, `config.ini` already exists** | Prints a message and argparse's usage line, then exits | Same message; the usage line is this program's own — every flag on one line rather than argparse's wrapped, fully-enumerated form |
-| **`~` in a path** | Expanded by the program, so `"~/Astro/M31"` works quoted | Left to the shell; use `$HOME/Astro/M31` or an unquoted `~` |
-| **Log: the command line** | `Calling function and arguments provided:` names `AstroBinUpload.py` | Names the executable. Nothing else can be true of a compiled program |
-| **Log: a fatal error** | A full Python traceback | The failing step and its error message |
-
-The log file itself deserves a word. It is written to the same place, in the
-same format, with the same records in the same order — and the
-`funcName`/`Line:` fields still name the Python function and line each record
-came from, because that is what a reader comparing the two logs expects to
-see. Only the timestamps differ, and those differ between two runs of the
-Python utility as well.
-
-One of the Python program's records has no counterpart here and is never
-written: one reporting a coordinate-alignment failure that this edition's
-alignment cannot suffer. The other 84 are all present, including the one
-announcing that a default `config.ini` was generated.
-
-### About the screenshots
-
-The screenshots throughout this document were captured from the Python
-utility. They are reproduced here unchanged because the output is identical —
-what you see on screen and in the files is what this edition produces.
-
 ## **Pre-requisites**
 
-None to speak of. This edition is a single self-contained executable — there
-is no Python to install, no `pip`, no libraries, and no build toolchain. It
-runs on Windows, Linux and macOS, on both Intel/AMD and ARM processors.
+None to speak of. `astrobin-upload` is a single self-contained executable —
+no runtime, no libraries, no build tools. It runs on Windows, Linux and
+macOS, on both Intel/AMD and ARM processors.
 
 - **No installer and no administrator rights.** The program is one file. Put
   it anywhere you can write to and run it from there.
@@ -212,8 +165,7 @@ same reason — the executable is not code-signed. Choose *More info → Run any
 ### **Creating your config.ini**
 
 The utility needs a `config.ini`. Run it once with no arguments in the
-directory you intend to work from, and it writes a default one and exits —
-the same first-run behaviour as the Python original:
+directory you intend to work from, and it writes a default one and exits:
 
     astrobin-upload
 
@@ -264,13 +216,12 @@ The secret section holds:
         EMAIL_ADDRESS = your_email@example.com
 ```
 
-This edition talks to the same two services the Python utility does —
-lightpollutionmap.info and Nominatim (OpenStreetMap) — over `ureq` with
-rustls and bundled root certificates rather than Python's `requests`/`geopy`
-stack, so no system TLS library or CA store is needed on any platform. Every
-failure mode degrades the same way as the Python utility: no valid key, no
-network, a refused or malformed response — the run always completes, falling
-back to `[defaults]`.
+The two services contacted are lightpollutionmap.info (sky quality) and
+Nominatim / OpenStreetMap (reverse geocoding). TLS and the root certificates
+are built into the executable, so no system TLS library or certificate store
+is needed on any platform. Every failure mode degrades gracefully — no valid
+key, no network, a refused or malformed response — and the run always
+completes, falling back to `[defaults]`.
 
 ### **[sites]**
 The `[sites]` section holds historic site information the utility has found.
@@ -459,7 +410,7 @@ The [override] section provides a translation layer that allows you to map non-s
 The utility is called from the command line. There are two calling methods.
 
 Called with no arguments and no existing `config.ini`, it writes a default
-one and exits — the same first-run behaviour as the Python utility. See
+one and exits. See
 [Creating your config.ini](#creating-your-configini) for what to edit before
 your first real run, and keep a backup once you have personalised it. Called
 with no arguments when `config.ini` already exists, it prints a message and
@@ -511,7 +462,7 @@ The `--test` flag allows you to re-run the entire pipeline using a CSV file inst
 
 #### **3. Error Handling and Logging**
 If the utility encounters a fatal error, it automatically performs an "Emergency Dump":
-- The failure is recorded in `AstroBinUploader.log`, naming the pipeline step that failed and the error it raised. (The Python utility records a full Python traceback here; this edition records the error message.)
+- The failure is recorded in `AstroBinUploader.log`, naming the pipeline step that failed and the error it raised.
 - Whatever metadata was successfully scanned is saved to **`emergency_raw_dump.csv`**. 
 - This dump can be fed directly back into the utility using the `--test` flag once the issue is resolved.
 
@@ -659,9 +610,6 @@ Note: although data is reported on a per-site basis, data is aggregated from all
 
 ### **The program will not start**
 
-There is nothing to install, so `ModuleNotFoundError` and `pip` problems
-cannot occur. What can:
-
 * **"Permission denied" (Linux/macOS)**: the executable bit was lost in
   extraction. `chmod +x astrobin-upload`.
 * **macOS refuses to open it**: the binary is not notarised. Allow it under
@@ -682,8 +630,8 @@ right path.
 
 ### **A path starting with `~` is not found**
 
-Quote-protected tildes are not expanded by this edition (`"~/Astro/M31"`).
-Use `$HOME/Astro/M31`, or leave the tilde unquoted so the shell expands it.
+A quoted `~` is not expanded (`"~/Astro/M31"`). Use `$HOME/Astro/M31`, or
+leave the tilde unquoted so the shell expands it before the program sees it.
 
 ### **Common FITS/XISF Header Issues**
 * **Missing Keywords**: If the utility cannot find specific equipment or location data in your file headers, it will automatically fall back to the values defined in the `[defaults]` section of your `config.ini`.
@@ -845,11 +793,11 @@ The utility was developed to work with the following sources of image files
 
 3. [PixInsight](https://pixinsight.com/) for Master calibration frames
 
-FIT, FITS and FTS headers are read by a hand-written reader in this edition,
-matching [Astropy's FITS header library](https://docs.astropy.org/en/stable/io/fits/index.html)
-card for card — that is what lets the program ship as one file with nothing to
-install. XISF headers are read per the
-[Pixinsight XISF header specification](https://pixinsight.com/doc/docs/XISF-1.0-spec/XISF-1.0-spec.html#xisf_header).
+FIT, FITS and FTS headers are read following the card presentation rules of
+[Astropy's FITS header library](https://docs.astropy.org/en/stable/io/fits/index.html);
+XISF headers are read per the
+[PixInsight XISF header specification](https://pixinsight.com/doc/docs/XISF-1.0-spec/XISF-1.0-spec.html#xisf_header).
+The header readers are built in, which is what keeps the program a single file.
 
 
 ## **Building from source**
@@ -869,8 +817,7 @@ the result ship as a single file.
 
 This program is intended for educational purposes in the field of
 astrophotography. It is part of an open-source project and contributions or
-suggestions for improvements are welcome. Development happens on the Python
-utility this edition is a port of.
+suggestions for improvements are welcome.
 
 To contribute to this project, follow these steps:
 
