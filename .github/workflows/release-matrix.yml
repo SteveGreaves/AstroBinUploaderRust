@@ -160,8 +160,13 @@ jobs:
 
           Output is byte-for-byte identical to
           [AstroBinUploader](https://github.com/SteveGreaves/AstroBinUploader)
-          v2.1.3 -- the same CSV, the same summary, the same `--debug` files
+          v2.2.1 -- the same CSV, the same summary, the same `--debug` files
           and the same log.
+
+          This release adds the site-lookup network layer (reverse geocoding
+          and live sky quality via a `[secret]` API key), first-run
+          `config.ini` generation, and the fix that keeps that API key out of
+          the log on a failed request.
 
           ### Which file do I want?
 
