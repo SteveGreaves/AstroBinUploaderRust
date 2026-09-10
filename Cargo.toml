@@ -1,6 +1,6 @@
 [package]
 name = "astrobin-upload"
-version = "2.2.1"
+version = "2.2.2"
 edition = "2021"
 rust-version = "1.74"
 description = "Astrophotography metadata ETL for AstroBin bulk uploads — Rust port of AstroBinUpload.py"
