@@ -44,6 +44,7 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
 
     stage1_hardware_overrides(&mut df, cfg)?;
     stage2_lowercase_and_coalesce(&mut df)?;
+    stage2b_exposure_fallback(&mut df)?;
     stage3_defaults(&mut df, cfg)?;
     stage3b_equipment_overrides(&mut df, cfg);
     let mut df = stage4_initial_filter(df);
@@ -52,7 +53,7 @@ pub fn execute(table: &Table, cfg: &AppConfig) -> Result<Table> {
     stage7_harden(&mut df, cfg);
     crate::log_debug!(
         "execute",
-        308,
+        361,
         "Completed data type conversion and header normalization"
     );
 
@@ -189,6 +190,60 @@ fn stage2_lowercase_and_coalesce(df: &mut Table) -> Result<()> {
     Ok(())
 }
 
+/// Stage 2b — fall back to the FITS-standard `EXPTIME` where `EXPOSURE` is
+/// missing.
+///
+/// `EXPTIME` is the FITS standard keyword for integration time; `EXPOSURE` is
+/// the widespread non-standard sibling. N.I.N.A. writes both, so raw lights
+/// carry either. PixInsight's integrated masters carry `EXPTIME` only, which
+/// left `exposure` empty for every master; stage 7 then hardened those gaps to
+/// 0.0 and the session summary reported every master calibration total as
+/// `0 hrs 0 mins` — reported from the field against a real WBPP output.
+///
+/// Gaps only: a frame that supplies a real `EXPOSURE` keeps it, so this can
+/// never override found data. It runs before stage 3 so that a header value
+/// always outranks a `[defaults]` one.
+///
+/// `[override] EXPOSURE = EXPTIME`, which the generated config ships, is a
+/// *replacement* rather than a fallback — stage 1 drops the `exptime` column
+/// outright — so this is a no-op whenever that line is present, and only
+/// rescues a config written before it existed.
+fn stage2b_exposure_fallback(df: &mut Table) -> Result<()> {
+    let Some(exptime) = df.column(col::EXPTIME).cloned() else {
+        return Ok(());
+    };
+    let Some(exposure) = df.column(col::DURATION) else {
+        crate::log_debug!(
+            "execute",
+            149,
+            "Exposure fallback: no EXPOSURE column, using EXPTIME"
+        );
+        let mut carried = exptime;
+        carried.name = col::DURATION.to_string();
+        df.columns.push(carried);
+        return Ok(());
+    };
+    let gaps = exposure
+        .cells
+        .iter()
+        .zip(&exptime.cells)
+        .filter(|(found, standard)| found.is_null() && !standard.is_null())
+        .count();
+    if gaps == 0 {
+        return Ok(());
+    }
+    crate::log_debug!(
+        "execute",
+        154,
+        "Exposure fallback: filling {gaps} missing EXPOSURE value(s) from EXPTIME"
+    );
+    let merged = fillna_from(exposure, &exptime)
+        .context("falling EXPOSURE back to the standard EXPTIME keyword")?;
+    *df.column_mut(col::DURATION)
+        .expect("column just read is still present") = merged;
+    Ok(())
+}
+
 /// Stage 3 — inject a default for every core key still missing.
 fn stage3_defaults(df: &mut Table, cfg: &AppConfig) -> Result<()> {
     for (key, value) in &cfg.defaults {
@@ -199,7 +254,7 @@ fn stage3_defaults(df: &mut Table, cfg: &AppConfig) -> Result<()> {
         let scalar = AppConfig::default_scalar(key, value)?;
         crate::log_debug!(
             "execute",
-            139,
+            168,
             "Default Injection: Key '{key}' not found, using default '{scalar}'"
         );
         df.set_scalar(&lower, Cell::Str(scalar));
@@ -213,7 +268,7 @@ fn stage3b_equipment_overrides(df: &mut Table, cfg: &AppConfig) {
     for (key, value) in &cfg.equipment_overrides {
         crate::log_debug!(
             "execute",
-            150,
+            179,
             "Equipment Override: forcing '{}' = '{value}'",
             key.to_lowercase()
         );
@@ -229,7 +284,7 @@ fn stage4_initial_filter(mut df: Table) -> Table {
     if !df.has_column(col::IMAGE_TYPE) {
         return df;
     }
-    crate::log_debug!("execute", 158, "Performing initial image type filtering");
+    crate::log_debug!("execute", 187, "Performing initial image type filtering");
     let upper: Vec<String> = df
         .column(col::IMAGE_TYPE)
         .unwrap()
@@ -295,7 +350,7 @@ impl GroupKey {
 /// the early return when there are no calibration frames at all, which leaves
 /// row order untouched.
 fn stage5_master_preference(df: &mut Table) -> Result<Table> {
-    crate::log_debug!("execute", 167, "Executing master preference filtering");
+    crate::log_debug!("execute", 196, "Executing master preference filtering");
     let Some(itype) = df.column(col::IMAGE_TYPE) else {
         bail!("master preference needs an '{}' column", col::IMAGE_TYPE);
     };
@@ -357,7 +412,7 @@ fn stage5_master_preference(df: &mut Table) -> Result<Table> {
                 Some((d, i)) => {
                     crate::log_debug!(
                         "_execute_master_preference",
-                        409,
+                        462,
                         "Master Preference: {} masters found for group {}; kept the \
                          most recent (DATE-OBS={}).",
                         masters.len(),
@@ -369,7 +424,7 @@ fn stage5_master_preference(df: &mut Table) -> Result<Table> {
                 None => {
                     crate::log_debug!(
                         "_execute_master_preference",
-                        418,
+                        471,
                         "Master Preference: {} masters found for group {} but none had \
                          a usable DATE-OBS; kept the first found under scan order.",
                         masters.len(),
@@ -387,7 +442,7 @@ fn stage5_master_preference(df: &mut Table) -> Result<Table> {
     if dropped > 0 {
         crate::log_debug!(
             "_execute_master_preference",
-            432,
+            485,
             "Master Preference Filter: Dropped {dropped} redundant raw/duplicate \
              calibration frames."
         );
@@ -434,7 +489,7 @@ fn group_key(df: &Table, row: usize, itype: &str) -> Result<GroupKey> {
             if other.is_err() {
                 crate::log_debug!(
                     "get_group_key",
-                    345,
+                    398,
                     "Master preference: unparseable GAIN for {}, using 0 ({})",
                     filename_or_unknown(df, row),
                     crate::steps::python_float_error(cell(col::GAIN)?)
@@ -451,7 +506,7 @@ fn group_key(df: &Table, row: usize, itype: &str) -> Result<GroupKey> {
         Err(()) => {
             crate::log_debug!(
                 "get_group_key",
-                355,
+                408,
                 "Master preference: unparseable EGAIN for {}, using 1.00 ({})",
                 filename_or_unknown(df, row),
                 crate::steps::python_float_error(cell(col::EGAIN)?)
@@ -468,7 +523,7 @@ fn group_key(df: &Table, row: usize, itype: &str) -> Result<GroupKey> {
             Err(()) => {
                 crate::log_debug!(
                     "get_group_key",
-                    374,
+                    427,
                     "Master preference: unparseable DURATION for {}, using 0.00 ({})",
                     filename_or_unknown(df, row),
                     crate::steps::python_float_error(cell(col::DURATION)?)
@@ -562,7 +617,7 @@ fn stage6_normalize_image_type(df: &mut Table) {
     if !df.has_column(col::IMAGE_TYPE) {
         return;
     }
-    crate::log_debug!("execute", 172, "Standardizing image type values");
+    crate::log_debug!("execute", 201, "Standardizing image type values");
 
     // `sorted(type_map.items(), key=lambda x: len(x[0]), reverse=True)` --
     // stable, so equal-length keywords keep the dict's insertion order. Spelt
@@ -603,7 +658,7 @@ fn stage6_normalize_image_type(df: &mut Table) {
         if (0..original.len()).any(|i| !assigned[i] && original[i].contains(keyword)) {
             crate::log_debug!(
                 "execute",
-                210,
+                239,
                 "Converted IMAGETYP keyword '{keyword}' to {normalized}"
             );
         }
@@ -629,8 +684,9 @@ fn stage6_normalize_image_type(df: &mut Table) {
 enum Harden {
     /// `to_numeric(coerce).fillna(default).astype(float)`
     Float(f64),
-    /// `exposure`: as above but with a pandas `.round(2)` in the middle.
-    Exposure,
+    /// `exposure`: as above but with a pandas `.round(2)` after the
+    /// fillna, so the configured default is rounded too.
+    Exposure(f64),
     /// `gain`: `.round()` then `astype(int)`.
     Gain(i64),
     /// `number`: `fillna(1).astype(int)`, preserving master sub-counts.
@@ -690,13 +746,21 @@ fn cfg_default_str(cfg: &AppConfig, raw_key: &str, fallback: &str) -> String {
 fn stage7_harden(df: &mut Table, cfg: &AppConfig) {
     crate::log_debug!(
         "execute",
-        216,
+        245,
         "Reducing headers and hardening core column data types"
     );
     use Harden::*;
 
-    // These seven disagree with their hardcoded fallback whenever the user's
+    // These eleven disagree with their hardcoded fallback whenever the user's
     // config actually defines them — see `cfg_default_raw`'s doc comment.
+    // EXPOSURE/CCD-TEMP/FOCRATIO/XBINNING joined the original seven when a
+    // field report showed `[defaults] EXPOSURE` being ignored for every
+    // PixInsight master; they are exactly the remaining keys whose default is
+    // applied *per cell* below, which is what makes them reachable at all.
+    // BORTLE/SQM/SITE (GeocodeStep, sites.rs) and HFR (optical.rs) are
+    // deliberately NOT here: they are read from the config by their owning
+    // step, and reading them here too would give one key two consumption
+    // points — see the matching note in `base.py`.
     // `FOCALLEN` keeps Python's exact type asymmetry: the *entirely-missing-
     // column* default stays the bare int 500 when the config doesn't define
     // FOCALLEN at all (matching `_configured_default`'s `fallback` argument,
@@ -704,6 +768,10 @@ fn stage7_harden(df: &mut Table, cfg: &AppConfig) {
     // a configured value exists to cast.
     let gain_default = cfg_default_int(cfg, "GAIN", 0);
     let egain_default = cfg_default_float(cfg, "EGAIN", 1.0);
+    let exposure_default = cfg_default_float(cfg, "EXPOSURE", 0.0);
+    let ccdtemp_default = cfg_default_float(cfg, "CCD-TEMP", -10.0);
+    let focratio_default = cfg_default_float(cfg, "FOCRATIO", 5.0);
+    let xbinning_default = cfg_default_int(cfg, "XBINNING", 1);
     let focallen_raw = cfg_default_raw(cfg, "FOCALLEN").and_then(|s| s.trim().parse::<f64>().ok());
     let focallen_missing = match focallen_raw {
         Some(v) => Cell::Float(v),
@@ -718,10 +786,14 @@ fn stage7_harden(df: &mut Table, cfg: &AppConfig) {
     let core: &[(&str, Cell, Harden)] = &[
         (col::GAIN, Cell::Int(gain_default), Gain(gain_default)),
         (col::EGAIN, Cell::Float(egain_default), Float(egain_default)),
-        (col::DURATION, Cell::Float(0.0), Exposure),
-        (col::SENSOR_COOLING, Cell::Float(-10.0), Float(-10.0)),
+        (
+            col::DURATION,
+            Cell::Float(exposure_default),
+            Exposure(exposure_default),
+        ),
+        (col::SENSOR_COOLING, Cell::Float(ccdtemp_default), Float(ccdtemp_default)),
         (col::FOCAL_LENGTH, focallen_missing, Float(focallen_default)),
-        (col::F_NUMBER, Cell::Float(5.0), Float(5.0)),
+        (col::F_NUMBER, Cell::Float(focratio_default), Float(focratio_default)),
         (col::PIXEL_SIZE, Cell::Float(xpixsz_default), Float(xpixsz_default)),
         (col::SITE_LAT, Cell::Float(sitelat_default), Float(sitelat_default)),
         (col::SITE_LONG, Cell::Float(sitelong_default), Float(sitelong_default)),
@@ -739,7 +811,11 @@ fn stage7_harden(df: &mut Table, cfg: &AppConfig) {
             AsFound,
         ),
         (col::SITE_NAME, Cell::Str("Unknown Site".into()), Site),
-        (col::BINNING, Cell::Int(1), Float(1.0)),
+        (
+            col::BINNING,
+            Cell::Int(xbinning_default),
+            Float(xbinning_default as f64),
+        ),
         (col::HFR, Cell::Float(1.0), Float(1.0)),
         (col::MEAN_FWHM, Cell::Float(0.0), Float(0.0)),
         (col::IMSCALE, Cell::Float(1.0), Float(1.0)),
@@ -767,13 +843,13 @@ fn stage7_harden(df: &mut Table, cfg: &AppConfig) {
                     .map(|c| Cell::Float(to_numeric(c).unwrap_or(*default)))
                     .collect(),
             },
-            Exposure => Column {
+            Exposure(default) => Column {
                 name: name.to_string(),
                 dtype: DType::Float,
                 cells: column
                     .cells
                     .iter()
-                    .map(|c| Cell::Float(numpy_round(to_numeric(c).unwrap_or(0.0), 2)))
+                    .map(|c| Cell::Float(numpy_round(to_numeric(c).unwrap_or(*default), 2)))
                     .collect(),
             },
             Gain(default) => Column {
@@ -977,6 +1053,189 @@ mod tests {
         assert_eq!(
             types(&df),
             vec!["MASTERDARK", "MASTERDARKFLAT", "DARKFLAT", "LIGHT", "BIAS"]
+        );
+    }
+
+    // --- Stage 2b: the EXPTIME fallback -------------------------------
+    //
+    // No golden fixture reaches any of this: every fixture in the corpus
+    // carries BOTH keys, populated and in agreement, so the whole corpus is
+    // a no-op for this path by construction. It is only exercised here.
+
+    #[test]
+    fn a_master_with_only_exptime_gets_its_exposure_from_it() {
+        // PixInsight's integrated masters carry EXPTIME and no EXPOSURE.
+        // Reported from the field: every master calibration total read
+        // `0 hrs 0 mins` because `exposure` blanked and stage 7 hardened
+        // the gap to 0.0.
+        let mut df = Table::parse_str(
+            "imagetyp,exptime,exposure\n\
+             LIGHT,600,600\n\
+             MASTERDARK,600,\n\
+             MASTERFLAT,1.22,\n",
+        )
+        .unwrap();
+        stage2b_exposure_fallback(&mut df).unwrap();
+        assert_eq!(
+            df.column("exposure").unwrap().cells,
+            vec![Cell::Float(600.0), Cell::Float(600.0), Cell::Float(1.22)]
+        );
+    }
+
+    #[test]
+    fn a_found_exposure_always_outranks_exptime() {
+        // Gaps only. A frame supplying a real EXPOSURE keeps it, so the
+        // fallback can never override found data -- that is what makes it a
+        // fallback rather than the [override] section's replacement.
+        let mut df = Table::parse_str("exptime,exposure\n1.0,600\n2.0,300\n").unwrap();
+        stage2b_exposure_fallback(&mut df).unwrap();
+        // With no gap to fill there is no fillna, so the column keeps the
+        // integer dtype it parsed as -- pandas behaves the same way.
+        assert_eq!(
+            df.column("exposure").unwrap().cells,
+            vec![Cell::Int(600), Cell::Int(300)]
+        );
+    }
+
+    #[test]
+    fn an_exptime_only_dataset_gains_the_exposure_column_outright() {
+        let mut df = Table::parse_str("imagetyp,exptime\nMASTERFLAT,1.22\n").unwrap();
+        assert!(!df.has_column("exposure"));
+        stage2b_exposure_fallback(&mut df).unwrap();
+        assert_eq!(df.column("exposure").unwrap().cells, vec![Cell::Float(1.22)]);
+    }
+
+    #[test]
+    fn with_no_exptime_at_all_the_fallback_does_nothing() {
+        let mut df = Table::parse_str("exposure\n600\n").unwrap();
+        stage2b_exposure_fallback(&mut df).unwrap();
+        assert_eq!(df.column("exposure").unwrap().cells, vec![Cell::Int(600)]);
+        assert!(!df.has_column("exptime"));
+    }
+
+    #[test]
+    fn the_override_section_drops_exptime_first_so_stage2b_is_a_no_op_there() {
+        // `[override] EXPOSURE = EXPTIME`, which the generated config ships,
+        // is a *replacement*: stage 1 moves exptime onto exposure and drops
+        // the source column, so stage 2b has nothing left to do. Asserted so
+        // that reordering the two stages cannot pass silently.
+        let mut df =
+            Table::parse_str("imagetyp,exptime\nMASTERDARK,600\n").unwrap();
+        let cfg = config("[override]\nEXPOSURE = EXPTIME\n");
+        stage1_hardware_overrides(&mut df, &cfg).unwrap();
+        stage2_lowercase_and_coalesce(&mut df).unwrap();
+        // Stage 1 has already moved the value across and dropped the source,
+        // so stage 2b finds nothing to do -- and must not undo anything.
+        assert!(!df.has_column("exptime"));
+        stage2b_exposure_fallback(&mut df).unwrap();
+        assert!(!df.has_column("exptime"));
+        assert_eq!(df.column("exposure").unwrap().cells, vec![Cell::Int(600)]);
+    }
+
+    // --- The four defaults that became config-driven -------------------
+
+    #[test]
+    fn a_per_cell_blank_exposure_falls_back_to_the_configured_default() {
+        // The reported defect: [defaults] EXPOSURE was documented, shipped
+        // and settable, but stage 7 used a hardcoded 0.0, so setting it had
+        // no effect whenever the column existed and only some cells were
+        // blank -- which is every mixed lights-plus-masters directory.
+        let mut df =
+            Table::parse_str("imagetyp,exposure\nLIGHT,600\nMASTERDARK,\n").unwrap();
+        stage7_harden(&mut df, &config("[defaults]\nEXPOSURE = 30\n"));
+        assert_eq!(
+            df.column("exposure").unwrap().cells,
+            vec![Cell::Float(600.0), Cell::Float(30.0)]
+        );
+    }
+
+    #[test]
+    fn ccdtemp_focratio_and_xbinning_honour_their_configured_defaults_too() {
+        let mut df = Table::parse_str("ccd-temp,focratio,xbinning\n,,\n").unwrap();
+        stage7_harden(
+            &mut df,
+            &config("[defaults]\nCCD-TEMP = -15\nFOCRATIO = 7.5\nXBINNING = 2\n"),
+        );
+        assert_eq!(df.column("ccd-temp").unwrap().cells[0], Cell::Float(-15.0));
+        assert_eq!(df.column("focratio").unwrap().cells[0], Cell::Float(7.5));
+        assert_eq!(df.column("xbinning").unwrap().cells[0], Cell::Float(2.0));
+    }
+
+    #[test]
+    fn without_those_keys_the_hardcoded_literals_still_apply() {
+        let mut df = Table::parse_str("exposure,ccd-temp,focratio,xbinning\n,,,\n").unwrap();
+        stage7_harden(&mut df, &config(""));
+        assert_eq!(df.column("exposure").unwrap().cells[0], Cell::Float(0.0));
+        assert_eq!(df.column("ccd-temp").unwrap().cells[0], Cell::Float(-10.0));
+        assert_eq!(df.column("focratio").unwrap().cells[0], Cell::Float(5.0));
+        assert_eq!(df.column("xbinning").unwrap().cells[0], Cell::Float(1.0));
+    }
+
+    #[test]
+    fn a_non_integer_xbinning_default_falls_back_like_pythons_int() {
+        // `_configured_default('XBINNING', 1, int)` casts with int(), which
+        // raises on "2.0" and is caught. Rust's parse::<i64>() fails on the
+        // same input. Checked against the interpreter for "2.0"/"2"/" +2"/
+        // "2 "/"abc"/"" -- all six agree, which is why the cheaper parse is
+        // safe to use here.
+        let mut df = Table::parse_str("imagetyp,xbinning\nLIGHT,\n").unwrap();
+        stage7_harden(&mut df, &config("[defaults]\nXBINNING = 2.0\n"));
+        assert_eq!(df.column("xbinning").unwrap().cells[0], Cell::Float(1.0));
+    }
+
+    #[test]
+    fn the_override_replacement_can_lose_a_real_exposure_and_stage2b_cannot_help() {
+        // Documented, not fixed: `[override] EXPOSURE = EXPTIME` assigns the
+        // whole exptime column over exposure and drops the source, so a frame
+        // carrying a real EXPOSURE but a blank EXPTIME loses it -- and stage
+        // 2b, which runs afterwards, has no exptime column left to restore
+        // from. The row ends on the [defaults] value, here 30.
+        //
+        // Pre-existing behaviour of the [override] section, unchanged by the
+        // stage 2b work, and verified against live Python for this exact
+        // input (it returns the [defaults] value too). Unreached on real
+        // data: the reported dataset has 0 rows of this shape, and both
+        // configs give an identical `exposure` column across all 563 of its
+        // frames. Asserted so the asymmetry stays visible rather than being
+        // rediscovered from a user report.
+        //
+        // Header case matters here and must stay upper: stage 1 writes the
+        // config's own key spelling ("EXPOSURE"), so a lower-case fixture
+        // would leave TWO columns for stage 2 to coalesce and the found value
+        // would survive -- an artefact of the fixture, not the pipeline,
+        // which is fed upper-case FITS keys by the extractor.
+        let df = Table::parse_str(
+            "IMAGETYP,EXPTIME,EXPOSURE,GAIN,EGAIN,XBINNING\nLIGHT,,600,100,0.25,1\n",
+        )
+        .unwrap();
+        let out = execute(
+            &df,
+            &config("[defaults]\nEXPOSURE = 30\n[override]\nEXPOSURE = EXPTIME\n"),
+        )
+        .unwrap();
+        assert!(!out.has_column("exptime"));
+        assert_eq!(
+            out.column("exposure").unwrap().cells,
+            vec![Cell::Float(30.0)]
+        );
+    }
+
+    #[test]
+    fn bortle_sqm_site_and_hfr_stay_literal_here_they_belong_to_other_steps() {
+        // Their [defaults] keys are read by GeocodeStep/sites.rs and
+        // optical.rs. Reading them here as well would give one key two
+        // consumption points at two layers -- the bug class 1fdfbd2 fixed.
+        let mut df = Table::parse_str("bortle,sqm,site,hfr\n,,,\n").unwrap();
+        stage7_harden(
+            &mut df,
+            &config("[defaults]\nBORTLE = 9\nSQM = 15.5\nSITE = Elsewhere\nHFR = 3.3\n"),
+        );
+        assert_eq!(df.column("bortle").unwrap().cells[0], Cell::Float(4.0));
+        assert_eq!(df.column("sqm").unwrap().cells[0], Cell::Float(21.0));
+        assert_eq!(df.column("hfr").unwrap().cells[0], Cell::Float(1.0));
+        assert_eq!(
+            df.column("site").unwrap().cells[0],
+            Cell::Str("Unknown Site".into())
         );
     }
 
