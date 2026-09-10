@@ -49,12 +49,10 @@ fn main() -> Result<()> {
                  Give one or more directories to scan.\n",
                 args.config.display()
             );
-            // Deliberately not byte-parity with `parser.print_usage()`:
-            // argparse enumerates every flag across several wrapped lines;
-            // clap collapses to `[OPTIONS]`. Reimplementing argparse's
-            // formatter isn't worth it for one usage line -- recorded in
-            // README.md's differences section rather than hidden
-            // behind a claim this matches.
+            // The usage line clap renders here collapses every flag to
+            // `[OPTIONS]` rather than enumerating them across wrapped lines.
+            // Reproducing argparse's formatter for one line isn't worth it,
+            // so the line is simply this program's own.
             print!("{}", Cli::command().render_usage());
             println!();
             std::process::exit(1);
