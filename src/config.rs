@@ -75,6 +75,51 @@ impl Section {
             .filter_map(move |k| self.values.get_key_value(k))
     }
 
+    /// `repr(dict)` of this section for the log — `loader._redacted_section`.
+    ///
+    /// **The API key is the name on the left of the `=`**, not the value on
+    /// the right, so redaction replaces the *key*. `sites::redact_api_key`
+    /// solves the opposite direction (a key quoted inside a message) and does
+    /// not fit here; v2.2.1 exists to keep that credential out of this file,
+    /// and dumping the config would undo it.
+    ///
+    /// Keys are sorted rather than left in file order, on both sides: the
+    /// values are a `BTreeMap` here and an ordered dict there, and a fixed
+    /// order is easier to scan in a diagnostic anyway. Sub-sections — how
+    /// `[sites]` stores each site — are rendered recursively and sorted in
+    /// among the scalars, exactly as one Python dict of both would be.
+    pub fn redacted_repr(&self) -> String {
+        let mut entries: Vec<(&str, String)> = Vec::new();
+        for (k, v) in &self.values {
+            let rendered = match v {
+                Value::Str(s) => crate::extractor::py_str(s),
+                Value::List(items) => {
+                    let body: Vec<String> =
+                        items.iter().map(|s| crate::extractor::py_str(s)).collect();
+                    format!("[{}]", body.join(", "))
+                }
+            };
+            entries.push((k.as_str(), rendered));
+        }
+        for (k, sub) in &self.sections {
+            entries.push((k.as_str(), sub.redacted_repr()));
+        }
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+
+        let body: Vec<String> = entries
+            .into_iter()
+            .map(|(k, rendered)| {
+                let name = if crate::sites::is_valid_api_key(k.trim()) {
+                    "<redacted>".to_string()
+                } else {
+                    k.to_string()
+                };
+                format!("{}: {}", crate::extractor::py_str(&name), rendered)
+            })
+            .collect();
+        format!("{{{}}}", body.join(", "))
+    }
+
     fn insert(&mut self, key: String, value: Value) {
         if !self.values.contains_key(&key) {
             self.order.push(key.clone());

@@ -330,14 +330,14 @@ fn load_config(args: &Cli) -> Result<ConfigFile> {
         }
         log_error!(
             "load",
-            68,
+            88,
             "Custom configuration file missing: {}",
             args.config.display()
         );
         // Text matches Python's own `FileNotFoundError` message. This `Err`
         // is routed through `fatal_error` by `main`'s call site -- Python's
         // `try:` wraps `loader.load(...)`, so a missing custom config reaches
-        // the `main:315`/`316` records, the `[CRITICAL ERROR]` / `Detailed
+        // the `main:328`/`329` records, the `[CRITICAL ERROR]` / `Detailed
         // diagnostics` console lines and `exit(1)` (no emergency dump: no
         // `raw_df` yet). Verified byte-for-byte against live Python 2026-09-10.
         bail!(
@@ -349,10 +349,24 @@ fn load_config(args: &Cli) -> Result<ConfigFile> {
         .with_context(|| format!("parsing {}", args.config.display()))?;
     log_info!(
         "load",
-        81,
+        101,
         "Configuration loaded and normalized from {}",
         args.config.display()
     );
+    // What the program actually read is the single most useful thing to have
+    // when a run does something unexpected, and the log is what gets attached
+    // to a report -- a config with the e-mail address on the wrong side of
+    // the `=` cost a round trip that this record answers at a glance. One
+    // record per section, at DEBUG, so an ordinary run's log is unchanged.
+    // Section names are lowercased and sorted because `ConfigLoader.load`
+    // lowercases them and the dump is emitted from `sorted(normalized)`.
+    let mut names: Vec<String> = cfg.sections.keys().map(|k| k.to_lowercase()).collect();
+    names.sort();
+    for name in &names {
+        if let Some(section) = cfg.section(name) {
+            log_debug!("load", 110, "Config [{name}]: {}", section.redacted_repr());
+        }
+    }
     Ok(cfg)
 }
 
@@ -365,7 +379,7 @@ fn load_config(args: &Cli) -> Result<ConfigFile> {
 fn generate_default_config(path: &std::path::Path) -> Result<()> {
     log_info!(
         "load",
-        62,
+        82,
         "config.ini missing. Generating default configuration template."
     );
     config_write::write_default_config(path)
