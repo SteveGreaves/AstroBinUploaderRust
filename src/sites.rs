@@ -562,6 +562,25 @@ impl<'a> SiteLookup<'a> {
             } else if is_valid_api_key(key) {
                 api_key = Some(key.to_string());
                 api_endpoint = Some(v.as_str().trim().to_string());
+            } else if !key.eq_ignore_ascii_case("YOUR_API_KEY") {
+                // This section is the one place where a *key name* is data, so
+                // the natural edit -- replace the thing on the left -- is right
+                // for the API key and wrong for the address. Putting the
+                // address on the left, `me@example.com = your_email@example.com`,
+                // matches neither branch above and is dropped in silence: the
+                // run then completes with no reverse geocoding and no warning,
+                // and the site falls back to [defaults] SITE. `[override]` has
+                // named unrecognised targets since A6; this section needed it
+                // more. The shipped `YOUR_API_KEY` placeholder is excluded so a
+                // pristine config does not cry wolf on every first run.
+                crate::log_warning!(
+                    "__init__",
+                    333,
+                    "[secret] entry '{k}' is neither EMAIL_ADDRESS nor a valid \
+                     16-character API key, so it will be ignored. The API key is \
+                     the name on the left of the '='; your e-mail address is the \
+                     value on the right of EMAIL_ADDRESS."
+                );
             }
         }
 
@@ -570,7 +589,7 @@ impl<'a> SiteLookup<'a> {
         if !enabled && !cfg.secret.is_empty() {
             crate::log_warning!(
                 "__init__",
-                325,
+                342,
                 "[secret] is present but carries neither a usable 16-character \
                  API key nor an EMAIL_ADDRESS; no network lookups will be made."
             );
@@ -601,11 +620,11 @@ impl<'a> SiteLookup<'a> {
             return None;
         }
 
-        crate::log_info!("resolve", 347, "");
-        crate::log_info!("resolve", 348, "PROCESSING NEW LOCATION");
+        crate::log_info!("resolve", 364, "");
+        crate::log_info!("resolve", 365, "PROCESSING NEW LOCATION");
         crate::log_info!(
             "resolve",
-            349,
+            366,
             "Site location does not exist in existing sites: ({}, {})",
             python_repr_f64(lat),
             python_repr_f64(lon)
@@ -626,7 +645,7 @@ impl<'a> SiteLookup<'a> {
         {
             let r = get_bortle_sqm(self.transport, lat, lon, key, endpoint);
             if let Some(error) = &r.error {
-                crate::log_warning!("resolve", 360, "API error: {error}");
+                crate::log_warning!("resolve", 377, "API error: {error}");
             }
             // `if not (b == 0 and s == 0)`: the sentinel means "use defaults",
             // and any other pair -- including a genuine 0 on one side -- is a
@@ -640,7 +659,7 @@ impl<'a> SiteLookup<'a> {
         if site.is_none() && bortle.is_none() {
             crate::log_warning!(
                 "resolve",
-                365,
+                382,
                 "Neither the site name nor its sky quality could be resolved; \
                  falling back to the [defaults] values."
             );
@@ -652,7 +671,7 @@ impl<'a> SiteLookup<'a> {
             _ => {
                 crate::log_warning!(
                     "resolve",
-                    374,
+                    391,
                     "Sky quality unavailable, using defaults: Bortle {}, SQM {}",
                     self.default_bortle_raw,
                     self.default_sqm_raw
@@ -664,7 +683,7 @@ impl<'a> SiteLookup<'a> {
 
         crate::log_info!(
             "resolve",
-            380,
+            397,
             "Processed new location: {site}, Bortle: {bortle}, SQM: {}",
             python_repr_f64(sqm)
         );
@@ -703,7 +722,7 @@ impl<'a> SiteLookup<'a> {
             Ok(true) => {
                 crate::log_info!(
                     "save",
-                    430,
+                    447,
                     "Saved new site to {}: {site}",
                     config_path.display()
                 );
@@ -719,7 +738,7 @@ impl<'a> SiteLookup<'a> {
             Err(e) => {
                 crate::log_error!(
                     "save",
-                    434,
+                    451,
                     "Could not save the new site to {}: {e}",
                     config_path.display()
                 );
