@@ -53,7 +53,7 @@ fn main() -> Result<()> {
             // argparse enumerates every flag across several wrapped lines;
             // clap collapses to `[OPTIONS]`. Reimplementing argparse's
             // formatter isn't worth it for one usage line -- recorded in
-            // packaging/README.md's differences section rather than hidden
+            // README.md's differences section rather than hidden
             // behind a claim this matches.
             print!("{}", Cli::command().render_usage());
             println!();

@@ -89,8 +89,8 @@ jobs:
           dir="astrobin-upload-${{ matrix.target }}"
           mkdir "$dir"
           cp "target/${{ matrix.target }}/release/astrobin-upload" "$dir/"
-          cp packaging/config.ini.example packaging/README.md LICENSE "$dir/"
-          cp -r packaging/images "$dir/"
+          cp config.ini.example README.md LICENSE "$dir/"
+          cp -r images "$dir/"
           tar -czf "$dir.tar.gz" "$dir"
 
       - name: Stage package (Windows)
@@ -100,8 +100,8 @@ jobs:
           $dir = "astrobin-upload-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $dir | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/astrobin-upload.exe" $dir
-          Copy-Item packaging/config.ini.example, packaging/README.md, LICENSE $dir
-          Copy-Item -Recurse packaging/images $dir
+          Copy-Item config.ini.example, README.md, LICENSE $dir
+          Copy-Item -Recurse images $dir
           # Compress-Archive's treatment of a bare directory path differs
           # between PowerShell versions -- some put the folder at the zip root,
           # some its contents. The .NET call takes it as an explicit argument,
