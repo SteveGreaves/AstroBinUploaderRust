@@ -196,12 +196,37 @@ jobs:
 
           ### Getting started
 
-          Extract the archive, copy `config.ini.example` to `config.ini` and
-          edit it for your site and filters, then:
+          The program reads `config.ini` from **the directory you run it in**
+          -- not from the folder the executable is in, and not from your image
+          folder. So give it a working directory of its own:
+
+          1. **Make a folder to work from** and put the executable in it, or
+             anywhere on your `PATH`. Example: `~/astrobin` (Windows:
+             `C:\astrobin`).
+
+          2. **Put `config.ini` in that folder.** Copy `config.ini.example`
+             from the archive and rename it to `config.ini`, then edit it for
+             your site and filters. (Or just run `astrobin-upload` with no
+             arguments from the folder -- it writes a default `config.ini` for
+             you to edit.)
+
+          3. **Run it from that folder**, naming the directory holding your
+             frames. Your images can live anywhere; only `config.ini` has to
+             be here.
 
           ```
+          cd ~/astrobin
           astrobin-upload "/path/to/my/images/Sadr Region"
           ```
+
+          Results are written next to your images, in an `AstroBinUploadInfo`
+          folder -- the acquisition CSV, the session summary and the log.
+
+          > **If you see "A new config.ini file was created"** on a run where
+          > you expected results, you are in the wrong directory. The program
+          > did not find a `config.ini` where it was started, so it wrote a
+          > fresh blank one and stopped. `cd` to the folder holding your
+          > edited `config.ini` and run it again.
 
           `README.md` in the archive is the full manual.
           NOTES
