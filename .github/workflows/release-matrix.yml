@@ -219,8 +219,13 @@ jobs:
           astrobin-upload "/path/to/my/images/Sadr Region"
           ```
 
-          Results are written next to your images, in an `AstroBinUploadInfo`
-          folder -- the acquisition CSV, the session summary and the log.
+          Results are written into the **first** directory you name on the
+          command line, in a folder called `AstroBinUploadInfo` -- the
+          acquisition CSV, the session summary and the log. If you name
+          several directories they are all scanned, but only the first one
+          gets the output folder, and the output files are named after it:
+          `Sadr Region` produces `Sadr_Region_acquisition.csv`. Name your
+          target directory first.
 
           > **If you see "A new config.ini file was created"** on a run where
           > you expected results, you are in the wrong directory. The program
