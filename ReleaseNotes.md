@@ -25,7 +25,7 @@ the config model and read by the network layer above.
 **The utility now generates its own `config.ini`.** Run with no arguments
 and no existing config, it writes a default one — including the same
 per-section explanatory comments Python's generator adds — and exits, the
-same first-run behaviour as the Python original. `packaging/config.ini.example`
+same first-run behaviour as the Python original. `config.ini.example`
 is rebuilt from this generator's own output, correcting several values that
 had drifted from what the code actually defaults to (`USEOBSDATE`, `XPIXSZ`,
 `HFR`, `SITE`, and a stale `FWHM` key that is never read).

@@ -14,7 +14,7 @@
 //!   = {...}` assignments) — never parsed from text — so `indent_type` is
 //!   never set from a parsed line and defaults to `''`: the emitted file
 //!   carries **no indentation at all**, unlike the hand-formatted
-//!   `packaging/config.ini.example` this repo ships (8 spaces/level).
+//!   `config.ini.example` this repo ships (8 spaces/level).
 //!   [`GENERATED_DEFAULT_CONFIG`] is that exact output, captured from a real
 //!   run rather than assembled from the source's literal dicts — this
 //!   project's own recorded lesson is to copy an oracle's output, not
@@ -23,7 +23,7 @@
 //!   `ConfigObj`, adds one key under `[sites]`, and calls `write()`.
 //!   Measured (`/tmp/.../rt` round-trip probe, 2026-09-09): that round-trip
 //!   is byte-faithful on every config this project has on disk — the golden
-//!   harness fixture, `packaging/config.ini.example`, and the maintainer's
+//!   harness fixture, `config.ini.example`, and the maintainer's
 //!   own `config.ini`. So the port does not need a general ini writer, only
 //!   a splice: locate `[sites]`, leave every other byte untouched, and
 //!   insert one indented block exactly where Python's dict-ordered write
@@ -542,7 +542,7 @@ mod tests {
         // through `ConfigObj(...).write()` adds the missing trailing
         // newline -- `write()` never leaves a bare EOF. Without the fix,
         // the new block glued directly onto the last existing line
-        // (`sqm = 21        [["New Site"]]`), which packaging/config.ini.example
+        // (`sqm = 21        [["New Site"]]`), which config.ini.example
         // -- the file `cp`'d to a new user's config.ini -- would have hit,
         // since it ships with no trailing newline and [sites] is last.
         let input = "[sites]\n        [[Old]]\n                latitude = 1\n                longitude = 2\n                bortle = 4\n                sqm = 21";

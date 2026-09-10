@@ -7,8 +7,8 @@ This document describes the Rust port, a single self-contained executable
 whose output is byte-for-byte identical to the original
 [AstroBinUploader](https://github.com/SteveGreaves/AstroBinUploader) Python
 utility at v2.2.0. Everything below describes the Rust implementation
-specifically; see `packaging/README.md`'s
-[Differences from the Python utility](packaging/README.md#differences-from-the-python-utility)
+specifically; see `README.md`'s
+[Differences from the Python utility](README.md#differences-from-the-python-utility)
 for the handful of deliberate differences, such as no `~` path expansion.
 
 ## Architecture: The Pipeline Pattern
