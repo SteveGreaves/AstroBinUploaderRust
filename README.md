@@ -14,18 +14,17 @@ Usage:
 ## **Contents**
 
 - [Features](#features)
-- [Pre-requisites](#pre-requisites)
-    - [Installing the executable](#installing-the-executable)
-    - [Creating your config.ini](#creating-your-configini)
-    - [Using Alternative Configuration Files](#using-alternative-configuration-files)
-    - [Config.ini contents and editing](#configini-contents-and-editing)
-        - [[defaults]](#defaults)
-        - [[filters]](#filters)
-        - [[secret]](#secret)
-        - [[sites]](#sites)
-        - [[override]](#override)
-        - [[equipmentoverrides]](#equipmentoverrides)
-        - [Editing the config.ini](#editing-the-configini)
+- [Installing the executable](#installing-the-executable)
+- [Creating your config.ini](#creating-your-configini)
+- [Using Alternative Configuration Files](#using-alternative-configuration-files)
+- [Config.ini contents and editing](#configini-contents-and-editing)
+    - [[defaults]](#defaults)
+    - [[filters]](#filters)
+    - [[secret]](#secret)
+    - [[sites]](#sites)
+    - [[override]](#override)
+    - [[equipmentoverrides]](#equipmentoverrides)
+    - [Editing the config.ini](#editing-the-configini)
 - [Running the utility](#running-the-utility)
     - [A single directory path or symbolic link](#a-single-directory-path-or-symbolic-link)
     - [Multiple directory paths or symbolic links](#multiple-directory-paths-or-symbolic-links)
@@ -108,28 +107,7 @@ Key features include:
 
 <div style="page-break-after: always;"></div>
 
-## **Pre-requisites**
-
-None to speak of. `astrobin-upload` is a single self-contained executable —
-no runtime, no libraries, no build tools. It runs on Windows, Linux and
-macOS, on both Intel/AMD and ARM processors.
-
-- **No installer and no administrator rights.** The program is one file. Put
-  it anywhere you can write to and run it from there.
-- **No system libraries.** The Linux build is statically linked against musl,
-  so it has no glibc or distribution version requirement and runs on any
-  Linux from the last decade. The Windows and macOS builds use only what the
-  operating system already ships.
-- **No network unless you ask for one.** Every offline path runs with no
-  connection at all. A connection is used only when you have filled in
-  `[secret]` in `config.ini` and a site is not already known — see
-  [[secret]](#secret) and [Sky quality (Bortle and SQM)](#sky-quality-bortle-and-sqm).
-  TLS and the root certificates are built into the binary, so no system CA
-  store is needed.
-- **Disk space.** The extracted archive is a few megabytes. Output is written
-  next to your data in an `AstroBinUploadInfo` folder.
-
-### **Installing the executable**
+## **Installing the executable**
 
 1. Download the archive for your platform from the
    [releases page](https://github.com/SteveGreaves/AstroBinUploaderRust/releases):
@@ -162,7 +140,7 @@ attempt, or clear the quarantine flag yourself:
 **On Windows**, SmartScreen may warn that the publisher is unrecognised, for the
 same reason — the executable is not code-signed. Choose *More info → Run anyway*.
 
-### **Creating your config.ini**
+## **Creating your config.ini**
 
 The utility needs a `config.ini`. Run it once with no arguments in the
 directory you intend to work from, and it writes a default one and exits:
@@ -182,7 +160,7 @@ edits — give it one or more directories to scan instead. A description of
 every parameter in the file is given below. Once you have personalised it,
 make a backup.
 
-### **Using Alternative Configuration Files**
+## **Using Alternative Configuration Files**
 
 You can specify a custom configuration file using the `--config` (or `-c`) flag.
 
@@ -190,7 +168,7 @@ You can specify a custom configuration file using the `--config` (or `-c`) flag.
 
 This is ideal for users who manage different setups (e.g., Mono vs Color, Remote vs Local) and wish to switch profiles without renaming files to `config.ini`. If the specified file does not exist, the utility will report an error and exit.
 
-### **Config.ini contents and editing**
+## **Config.ini contents and editing**
 The config.ini file contains the following sections:
 ### **[defaults]**
 
