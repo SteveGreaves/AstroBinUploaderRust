@@ -1,11 +1,11 @@
-//! Rust port of AstroBinUpload.py — Phases 1–3.
+//! Rust port of AstroBinUpload.py.
 //!
-//! Parity target: Python `v2.1.1` (see PORT_PLAN.md). Landed: the CLI, the
-//! configobj-compatible config parser, the `--test` CSV ingest path with
-//! pandas-equivalent dtype inference, the six pipeline steps, and the
-//! exporter plus reports. Still missing: the FITS/XISF readers (Phase 4), so
-//! a run without `--test` has nothing to scan and says so rather than
-//! pretending otherwise.
+//! Parity target: Python `v2.2.0`/`v2.2.1` (see PORT_PLAN.md). Landed: the
+//! CLI, the configobj-compatible config parser, the `--test` CSV ingest path
+//! with pandas-equivalent dtype inference, the FITS/XISF readers, the six
+//! pipeline steps, the exporter plus reports, the first-run config bootstrap,
+//! the `[secret]`-gated site-lookup network layer, and `main`'s fatal-error
+//! net (`fatal_error`, below).
 
 mod appconfig;
 mod cli;
@@ -49,12 +49,10 @@ fn main() -> Result<()> {
                  Give one or more directories to scan.\n",
                 args.config.display()
             );
-            // Deliberately not byte-parity with `parser.print_usage()`:
-            // argparse enumerates every flag across several wrapped lines;
-            // clap collapses to `[OPTIONS]`. Reimplementing argparse's
-            // formatter isn't worth it for one usage line -- recorded in
-            // README.md's differences section rather than hidden
-            // behind a claim this matches.
+            // The usage line clap renders here collapses every flag to
+            // `[OPTIONS]` rather than enumerating them across wrapped lines.
+            // Reproducing argparse's formatter for one line isn't worth it,
+            // so the line is simply this program's own.
             print!("{}", Cli::command().render_usage());
             println!();
             std::process::exit(1);
@@ -120,7 +118,8 @@ fn main() -> Result<()> {
     // Opened before the configuration is read, so a configuration error is
     // itself logged -- which is why `load_config` is called below this rather
     // than with the dump paths above.
-    logging::init(&out_dir.join("AstroBinUploader.log"), args.debug);
+    let log_file = out_dir.join("AstroBinUploader.log");
+    logging::init(&log_file, args.debug);
     log_info!("main", 240, "Logging initialized.");
     log_info!("main", 245, "main version: {}", env!("CARGO_PKG_VERSION"));
     log_info!("main", 246, "utils version: {}", env!("CARGO_PKG_VERSION"));
@@ -147,20 +146,47 @@ fn main() -> Result<()> {
     println!("main version: {}", env!("CARGO_PKG_VERSION"));
     println!("utils version: {}", env!("CARGO_PKG_VERSION"));
 
-    let cfg = load_config(&args)?;
+    // Everything from here to `Processing complete.` is Python's `try:` block
+    // (`AstroBinUpload.py` main, Step 2-4): `loader.load`, the header read and
+    // its `--debug` step-00 export, `processor.run`, and `exporter.export`. A
+    // failure at any point reaches the same `except Exception` net -- the
+    // `main:315`/`316` records, the emergency dump, the two console lines and
+    // `sys.exit(1)` -- so each fallible call here routes to `fatal_error`
+    // rather than propagating out of `main` via `?`. The emergency dump only
+    // fires once `raw` is bound and non-empty, matching Python's
+    // `'raw_df' in locals() and not raw_df.empty`.
+    let cfg = match load_config(&args) {
+        Ok(cfg) => cfg,
+        Err(e) => fatal_error(&e, None, &out_dir_str, &log_file),
+    };
     // Built here rather than after extraction: the Python `AppConfig(...)`
     // constructor runs inside `ConfigLoader.load`, so the warnings its
-    // normalisers emit land before the scan's records, not after them.
-    let app = crate::appconfig::AppConfig::from_config(&cfg)?;
-    let raw = load_headers(&args, true, Some(out_dir_str.as_str()))?;
+    // normalisers emit land before the scan's records, not after them -- and,
+    // for the same reason, a failure to build it is a `loader.load` failure,
+    // reached before `raw_df` exists, so no emergency dump.
+    let app = match crate::appconfig::AppConfig::from_config(&cfg) {
+        Ok(app) => app,
+        Err(e) => fatal_error(&e, None, &out_dir_str, &log_file),
+    };
+    let raw = match load_headers(&args, true, Some(out_dir_str.as_str())) {
+        Ok(raw) => raw,
+        // `raw_df = extractor.extract_*(...)` has not completed assigning, so
+        // Python's `'raw_df' in locals()` is false here too: no dump.
+        Err(e) => fatal_error(&e, None, &out_dir_str, &log_file),
+    };
 
     // Written only on the scan path: the export sits in the `else` branch of
     // `if args.test`, so an injected run -- which was fed one of these files
     // in the first place -- does not rewrite it.
     if args.debug && args.test.is_none() && raw.n_rows > 0 {
         let path = pathutil::join(&out_dir_str, "debug_step_00_RawHeaders.csv");
-        std::fs::write(&path, exporter::to_csv(&raw))
-            .with_context(|| format!("writing {path}"))?;
+        // `raw` is bound by now, so a failure of this write *does* reach the
+        // emergency dump on the Python side (`raw_df` is in `locals()`).
+        if let Err(e) =
+            std::fs::write(&path, exporter::to_csv(&raw)).with_context(|| format!("writing {path}"))
+        {
+            fatal_error(&e, Some(&raw), &out_dir_str, &log_file);
+        }
         log_info!("main", 277, "Raw scanned headers exported to {path}");
     }
 
@@ -189,38 +215,72 @@ fn main() -> Result<()> {
         config_path,
     ) {
         Ok(agg) => agg,
-        Err(e) => {
-            log_error!(
-                "main",
-                315,
-                "The application encountered a fatal error and must exit."
-            );
-            log_error!("main", 316, "{e}");
-            // main()'s final safety net. The dump is deliberately non-fatal
-            // -- it runs while the program is already dying and must never
-            // itself raise -- and `--test` is not excluded here, unlike the
-            // step-00 export above.
-            if raw.n_rows > 0 {
-                let path = pathutil::join(&out_dir_str, "emergency_raw_dump.csv");
-                match std::fs::write(&path, exporter::to_csv(&raw)) {
-                    Ok(()) => println!("Emergency data dump saved to: {path}"),
-                    Err(err) => {
-                        eprintln!("Emergency data dump also failed: {err}");
-                        log_debug!("main", 329, "Emergency data dump also failed: {err}");
-                    }
-                }
-            }
-            return Err(e);
-        }
+        Err(e) => fatal_error(&e, Some(&raw), &out_dir_str, &log_file),
     };
 
     let now = local_timestamp();
-    if let Some(summary) = exporter::export(&agg, raw.n_rows, &basename, &out_dir, &now)? {
+    let summary = match exporter::export(&agg, raw.n_rows, &basename, &out_dir, &now) {
+        Ok(summary) => summary,
+        Err(e) => fatal_error(&e, Some(&raw), &out_dir_str, &log_file),
+    };
+    if let Some(summary) = summary {
         // `print(summary)` on the Python side.
         println!("{summary}");
     }
     println!("\nProcessing complete.");
     Ok(())
+}
+
+/// The Python `try:`/`except Exception` net around `main`'s Step 2-4
+/// (`AstroBinUpload.py`). `loader.load`, the header read, `processor.run` or
+/// `exporter.export` failing all land here:
+///
+/// * `logger.error(...)` / `logger.exception(e)` -- `main:315`/`316`. The
+///   port logs only `e`'s outermost message where Python's `logger.exception`
+///   also writes a traceback; that half is unmatchable by construction (the
+///   two stacks are different languages) and always has been.
+/// * the emergency dump, but only when `raw` is `Some` and non-empty --
+///   Python guards it on `'raw_df' in locals() and not raw_df.empty`, so a
+///   failure before the scan completes writes nothing. Non-fatal: it runs
+///   while the program is already exiting and must not itself raise.
+/// * `print(f"\n[CRITICAL ERROR]: {str(e)}")` and the `Detailed diagnostics`
+///   line naming the log file, then `sys.exit(1)`.
+///
+/// `str(e)` is `e`'s outermost message; `{e}` matches that (not `{e:#}`,
+/// which would append the whole `anyhow` context chain). Where a call above
+/// wraps its error in `.with_context(...)` -- the config *parse* path, the
+/// reader path -- `{e}` is that context string rather than Python's
+/// underlying library message; those paths are reachable only by a corrupt
+/// config or an unreadable file, no fixture exercises them, and exception
+/// text was never part of the parity claim.
+fn fatal_error(
+    e: &anyhow::Error,
+    raw: Option<&Table>,
+    out_dir_str: &str,
+    log_file: &std::path::Path,
+) -> ! {
+    log_error!(
+        "main",
+        315,
+        "The application encountered a fatal error and must exit."
+    );
+    log_error!("main", 316, "{e}");
+    if let Some(raw) = raw {
+        if raw.n_rows > 0 {
+            let path = pathutil::join(out_dir_str, "emergency_raw_dump.csv");
+            match std::fs::write(&path, exporter::to_csv(raw)) {
+                Ok(()) => println!("Emergency data dump saved to: {path}"),
+                // Python only `logger.debug`s this -- no console line.
+                Err(err) => log_debug!("main", 329, "Emergency data dump also failed: {err}"),
+            }
+        }
+    }
+    println!("\n[CRITICAL ERROR]: {e}");
+    println!(
+        "Detailed diagnostics have been saved to: {}",
+        log_file.display()
+    );
+    std::process::exit(1);
 }
 
 /// `ConfigLoader.load`.
@@ -246,14 +306,12 @@ fn load_config(args: &Cli) -> Result<ConfigFile> {
             "Custom configuration file missing: {}",
             args.config.display()
         );
-        // Text matches Python's own exception message, but the surrounding
-        // handling is pre-existing and still diverges, not something this
-        // phase touches: Python's `try:` wraps `loader.load(...)` too, so
-        // this failure reaches the `main:315`/`316` fatal-error log records
-        // (and, when directory paths were given, the emergency dump check).
-        // Here it propagates straight out of `main` via `?`, skipping both.
-        // No fixture exercises a missing config, so no harness catches the
-        // gap; see PORT_PLAN.md's Phase 7 pending list.
+        // Text matches Python's own `FileNotFoundError` message. This `Err`
+        // is routed through `fatal_error` by `main`'s call site -- Python's
+        // `try:` wraps `loader.load(...)`, so a missing custom config reaches
+        // the `main:315`/`316` records, the `[CRITICAL ERROR]` / `Detailed
+        // diagnostics` console lines and `exit(1)` (no emergency dump: no
+        // `raw_df` yet). Verified byte-for-byte against live Python 2026-09-10.
         bail!(
             "The specified configuration file '{}' was not found.",
             args.config.display()
