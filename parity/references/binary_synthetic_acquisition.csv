@@ -1,3 +1,0 @@
-date,filter,number,duration,binning,gain,sensorCooling,fNumber,darks,flats,flatDarks,bias,bortle,meanSqm,meanFwhm,temperature
-2026-03-01,4663,1,600.0,1.0,100,-10.0,5.4,50,0,0,0,4.0,21.0,2.87,11.5
-2026-03-01,4663,2,600.0,1.0,100,-10.0,5.4,50,0,0,0,4.0,21.0,2.87,11.5

@@ -53,6 +53,12 @@ pub struct Cli {
     /// Print the per-step canonical dump that `parity/dump_steps.py` produces
     /// on the Python side, and exit. Requires `--test`. Hidden: a verification
     /// aid, not part of the Python CLI surface.
+    ///
+    /// `parity/` is untracked -- the corpus and its harnesses live on the
+    /// maintainer's machine, not in this repository -- so these three hidden
+    /// flags have no in-repo counterpart to read. They stay because the
+    /// harnesses drive them, and removing them would break the only
+    /// byte-comparison against Python that exists.
     #[arg(long, hide = true)]
     pub dump_steps: bool,
 

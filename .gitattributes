@@ -1,18 +1,16 @@
-# The parity corpus is compared byte for byte, so git must not rewrite any of
-# it on checkout. On Windows, `core.autocrlf=true` is the default from Git for
-# Windows' installer, and it converts every LF in these files to CRLF -- after
-# which the binary (Rust's `writeln!` emits LF on every platform) differs from
-# its own reference on every single line, for a reason that has nothing to do
-# with the port. `-text` disables that conversion in both directions.
+# `include_str!` embeds a file's bytes verbatim. On Windows,
+# `core.autocrlf=true` is the default from Git for Windows' installer and
+# converts every LF in a tracked text file to CRLF on checkout -- after which
+# the embedded copy differs from the LF text the generator produces on every
+# single line, for a reason that has nothing to do with the port. `-text`
+# disables that conversion in both directions.
 #
-# Not theoretical: without this, `cargo test` on a Windows runner fails
-# `config_write::tests::generated_default_config_matches_the_committed_python_oracle`,
-# because that test `include_str!`s parity/references/generated_config_v2.2.0.ini
-# and compares it to generated text. It blocked the v2.2.1 release build.
-parity/references/**   -text
-parity/fixtures/**     -text
-parity/golden_config.ini -text
-
-# Truncated FITS and XISF frames: real binary content, never line-ending
-# material, and not worth attempting to diff as text.
-parity/fixtures/binary/**  binary
+# Not theoretical: this is what failed the first v2.2.1 release build, on
+# `x86_64-pc-windows-msvc` -- the one Windows target whose runner executes the
+# tests it builds.
+#
+# Note the asymmetry: `src/**.rs` needs no such rule. `GENERATED_DEFAULT_CONFIG`
+# is a raw string literal, and rustc normalises CRLF to LF inside string
+# literals, so the constant survives a converted checkout where the file it is
+# compared against does not.
+src/testdata/**   -text

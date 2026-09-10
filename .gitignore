@@ -9,3 +9,10 @@ config.ini
 SESSION.md
 SESSION.old.md
 PORT_PLAN.md
+
+# The parity corpus and its harnesses -- test code and test data stay off
+# GitHub (the user's standing policy; PR #2 was closed on the same grounds).
+# Still on disk and still the oracle for every parity check; they are simply
+# run from this machine rather than from a fresh clone or CI.
+# The one exception is src/testdata/, which the crate needs to compile.
+parity/

@@ -39,13 +39,11 @@ jobs:
             can_run: true
     runs-on: ${{ matrix.os }}
     steps:
-      # Windows' 260-character MAX_PATH is shorter than some committed
-      # fixture paths (parity/fixtures/binary/xisf_mixed/registered/... has
-      # real WBPP-generated names, and shortening them would mean the corpus
-      # no longer matches what it documents having captured). Git itself
-      # supports long paths past that limit; it just has to be told to, and
-      # that has to happen before checkout, not after -- the clone is where
-      # the limit bites.
+      # Kept after the parity corpus was untracked: Windows'
+      # 260-character MAX_PATH used to bite on the committed WBPP fixture
+      # names, and nothing tracked reaches that length today -- but git has
+      # to be told before checkout, not after, so re-adding it later means
+      # discovering the limit on a release build again. It costs nothing.
       - name: Enable long paths (Windows)
         if: runner.os == 'Windows'
         run: git config --global core.longpaths true
@@ -66,12 +64,14 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       # Only where the runner's own architecture can execute the result --
-      # cargo test builds and runs, it does not just compile. The parity
-      # harnesses (parity/*.py) are not run here: they need Python, pandas
-      # and the sibling AstroBinUploader checkout, none of which belongs in a
-      # release build's CI, and the Linux gnu target -- not part of this
-      # matrix, but exercised on every push in CI proper -- already carries
-      # that verification for the logic these targets share.
+      # cargo test builds and runs, it does not just compile. These unit
+      # tests are now the whole of CI's verification: the parity harnesses
+      # need Python, pandas, the sibling AstroBinUploader checkout and the
+      # corpus, and the corpus is deliberately untracked, so every
+      # byte-comparison against the Python oracle is run by hand on the
+      # maintainer's machine instead. Three of the five targets set
+      # `can_run`; the other two cross-compile without executing anything,
+      # so a defect specific to those two cannot be caught here.
       - name: Test
         if: matrix.can_run
         run: cargo test --release --target ${{ matrix.target }}
@@ -80,8 +80,8 @@ jobs:
       # executable, a configuration to start from (the binary refuses to run
       # without a config.ini and will not invent one), the licence GPL-3.0
       # requires travel with a binary, and usage documentation. Development
-      # material -- the parity corpus, the harnesses, the port plan -- stays
-      # in the repository and out of what is shipped.
+      # material -- the parity corpus, the harnesses, the port plan -- is
+      # untracked and never reaches a release.
       - name: Stage package (Unix)
         if: runner.os != 'Windows'
         run: |

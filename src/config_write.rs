@@ -607,16 +607,27 @@ mod tests {
 
     /// Pins `GENERATED_DEFAULT_CONFIG` against a real capture of Python
     /// v2.2.0's own generator output, committed at
-    /// `parity/references/generated_config_v2.2.0.ini` (reproduction
-    /// command in that constant's doc comment). Without this, the constant
-    /// is only ever checked against *itself* by the tests below it -- a
-    /// transcription could drift from the actual oracle with nothing to
-    /// catch it, exactly the failure Phase 7A1 had to clean up for the log
-    /// literals. When upstream's generator changes, re-run the capture and
-    /// update both this fixture and the constant together.
+    /// `src/testdata/generated_config_v2.2.0.ini` (reproduction command in
+    /// that constant's doc comment). Without this, the constant is only ever
+    /// checked against *itself* by the tests below it -- a transcription
+    /// could drift from the actual oracle with nothing to catch it, exactly
+    /// the failure Phase 7A1 had to clean up for the log literals. When
+    /// upstream's generator changes, re-run the capture and update both this
+    /// fixture and the constant together.
+    ///
+    /// The capture lives under `src/` rather than in the parity corpus
+    /// because it is the only fixture the crate itself needs to compile:
+    /// `parity/` is untracked (test data stays off GitHub), and this test
+    /// has to keep running on every release target. `.gitattributes` marks
+    /// it `-text` -- `include_str!` embeds the file's bytes verbatim, so a
+    /// Windows checkout with `core.autocrlf=true` would otherwise make every
+    /// line differ. (The constant above needs no such protection: it is a
+    /// raw string literal, and rustc normalises CRLF to LF inside string
+    /// literals. That asymmetry is exactly what failed the first v2.2.1
+    /// release build.)
     #[test]
     fn generated_default_config_matches_the_committed_python_oracle() {
-        let oracle = include_str!("../parity/references/generated_config_v2.2.0.ini");
+        let oracle = include_str!("testdata/generated_config_v2.2.0.ini");
         assert_eq!(GENERATED_DEFAULT_CONFIG, oracle);
     }
 
