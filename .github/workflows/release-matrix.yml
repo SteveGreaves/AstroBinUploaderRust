@@ -89,7 +89,7 @@ jobs:
           dir="astrobin-upload-${{ matrix.target }}"
           mkdir "$dir"
           cp "target/${{ matrix.target }}/release/astrobin-upload" "$dir/"
-          cp config.ini.example README.md LICENSE "$dir/"
+          cp config.ini.example README.md PROGRAM_OVERVIEW.md LICENSE "$dir/"
           cp -r images "$dir/"
           tar -czf "$dir.tar.gz" "$dir"
 
@@ -100,7 +100,7 @@ jobs:
           $dir = "astrobin-upload-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $dir | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/astrobin-upload.exe" $dir
-          Copy-Item config.ini.example, README.md, LICENSE $dir
+          Copy-Item config.ini.example, README.md, PROGRAM_OVERVIEW.md, LICENSE $dir
           Copy-Item -Recurse images $dir
           # Compress-Archive's treatment of a bare directory path differs
           # between PowerShell versions -- some put the folder at the zip root,
@@ -233,7 +233,8 @@ jobs:
           > fresh blank one and stopped. `cd` to the folder holding your
           > edited `config.ini` and run it again.
 
-          `README.md` in the archive is the full manual.
+          `README.md` in the archive is the full manual;
+          `PROGRAM_OVERVIEW.md` explains how the program works.
           NOTES
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
