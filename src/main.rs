@@ -785,14 +785,22 @@ mod tests {
     /// `resolve_test_csv`'s candidate construction (AstroBinUpload.py) --
     /// the part that can be unit-tested without the `process::exit` on its
     /// not-found path.
+    ///
+    /// The separator is platform-dependent because `pathutil::join` mirrors
+    /// `os.path.join`, which is `ntpath.join` on Windows: it appends `\` even
+    /// when the left-hand side is spelled with forward slashes. Asserting `/`
+    /// unconditionally is what failed the first v2.2.1 release build -- the
+    /// port was right and the test was not.
     #[test]
     fn candidates_are_output_dir_join_then_given_as_is() {
+        let joined = if cfg!(windows) {
+            "/scan/AstroBinUploadInfo\\replay.csv"
+        } else {
+            "/scan/AstroBinUploadInfo/replay.csv"
+        };
         assert_eq!(
             test_csv_candidates("replay.csv", "/scan/AstroBinUploadInfo"),
-            [
-                "/scan/AstroBinUploadInfo/replay.csv".to_string(),
-                "replay.csv".to_string()
-            ]
+            [joined.to_string(), "replay.csv".to_string()]
         );
     }
 
