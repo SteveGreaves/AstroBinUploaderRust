@@ -145,7 +145,10 @@ jobs:
 
       # Written out rather than `--generate-notes`: generated notes are built
       # from commit messages, which are development history and have no place
-      # on a page users download from.
+      # on a page users download from. Deliberately not a changelog either --
+      # what a user needs here is what the program is, why it is worth having,
+      # which file to take and how to start. Per-version detail, when it is
+      # worth publishing at all, goes in ReleaseNotes.md.
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -163,10 +166,23 @@ jobs:
           v2.2.1 -- the same CSV, the same summary, the same `--debug` files
           and the same log.
 
-          This release adds the site-lookup network layer (reverse geocoding
-          and live sky quality via a `[secret]` API key), first-run
-          `config.ini` generation, and the fix that keeps that API key out of
-          the log on a failed request.
+          ### Why use this instead
+
+          - **Nothing to install.** One file. No Python, no `pip`, no virtual
+            environment, no libraries. Download it, make it executable, run it.
+          - **Nothing to go wrong.** No `ModuleNotFoundError`, no
+            `externally-managed-environment`, no pinned library versions that
+            clash with other software on your machine, and nothing to
+            reinstall when your operating system updates its Python.
+          - **Faster.** It starts instantly -- there is no interpreter to load
+            and no large scientific libraries to import before the first frame
+            is read -- and it reads headers on all your CPU cores.
+          - **Runs anywhere.** Windows, Linux and macOS, on both Intel/AMD and
+            ARM. The Linux build is statically linked, so it works on any
+            distribution without matching system libraries.
+          - **Same results.** It is not a reimplementation that behaves "close
+            enough" -- every output file is compared byte for byte against the
+            Python utility.
 
           ### Which file do I want?
 
