@@ -16,3 +16,7 @@ PORT_PLAN.md
 # run from this machine rather than from a fresh clone or CI.
 # The one exception is src/testdata/, which the crate needs to compile.
 parity/
+
+# Rendered from the Markdown at release time, never committed.
+README.pdf
+PROGRAM_OVERVIEW.pdf
