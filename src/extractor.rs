@@ -342,7 +342,7 @@ fn python_dict_repr(r: &Record) -> String {
 
 /// `repr(str)`: single quotes unless the value itself contains one and no
 /// double quote, which is the only case CPython switches quoting style for.
-fn py_str(s: &str) -> String {
+pub(crate) fn py_str(s: &str) -> String {
     if s.contains('\'') && !s.contains('"') {
         format!("\"{}\"", s.replace('\\', "\\\\"))
     } else {

@@ -123,9 +123,26 @@ Key features include:
 2. Extract it. The archive contains the executable, `config.ini.example`,
    this `README.md`, its `images/` folder, and `LICENSE`.
 
-3. Put the executable wherever you like. Adding its folder to your `PATH` lets
-   you call `astrobin-upload` from anywhere; otherwise call it by its full path,
-   or `./astrobin-upload` from inside its own folder.
+3. Put the executable wherever you like, then call it from a terminal opened
+   in the folder you want to work in.
+
+   **A program in the current folder is not on your command path**, so its
+   bare name will not start it — you must say where it is:
+
+   | Shell | Type this |
+   |---|---|
+   | Linux / macOS | `./astrobin-upload` |
+   | Windows PowerShell | `.\astrobin-upload.exe` |
+   | Windows Command Prompt | `astrobin-upload.exe` |
+
+   Typing `astrobin-upload` on Linux or macOS gives `command not found`, and
+   on Windows PowerShell `The term 'astrobin-upload' is not recognized`. That
+   is the shell, not the program — see
+   [Troubleshooting](#troubleshooting).
+
+   Optionally, add the executable's folder to your `PATH`. Then the bare name
+   works from any directory, which is how the examples in this manual are
+   written.
 
 **On Linux and macOS**, mark it executable if your extraction tool did not:
 
@@ -143,11 +160,17 @@ same reason — the executable is not code-signed. Choose *More info → Run any
 ## **Creating your config.ini**
 
 The utility needs a `config.ini`. Run it once with no arguments in the
-directory you intend to work from, and it writes a default one and exits:
+directory you intend to work from, and it writes a default one and exits.
 
-    astrobin-upload
+This is the first command you will type, so it is written here in full — on
+Linux and macOS the leading `./` is required unless you have put the
+executable on your `PATH`:
+
+    ./astrobin-upload
 
     A new config.ini file was created. Please edit this before re-running the script.
+
+On Windows PowerShell that is `.\astrobin-upload.exe`.
 
 `config.ini` is looked for in the directory you run the utility *from*, not the
 directory the executable lives in. A `config.ini.example` is also supplied in
@@ -183,9 +206,9 @@ The filter section holds the filter name to AstroBin code mappings. The filter n
 
 ### **[secret]**
 The secret section holds:
-1. The sky quality API key and API endpoint required by the utility to obtain values of Bortle and SQM for the site location. Only the API key is to be edited. If there is no valid API key the values of Bortle and SQM are taken from `[defaults][BORTLE]` and `[defaults][SQM]` in the config.ini file.
+1. The sky quality API key and API endpoint required by the utility to obtain values of Bortle and SQM for the site location. Replace `YOUR_API_KEY` — the name on the **left** of the `=` — with the key itself, and leave the endpoint on the right alone. If there is no valid API key the values of Bortle and SQM are taken from `[defaults][BORTLE]` and `[defaults][SQM]` in the config.ini file.
 
-2. Your email address. This is sent as part of an information string to the reverse geocoding API, which is used to recover the site address. Unique site latitude and longitude values extracted from the headers are passed to the API to generate the site address. Your email address is passed to the API as a courtesy, so the provider can see who is using their API. If the API request fails the site location information is taken from `[defaults][SITE]`, `[defaults][SITELAT]` and `[defaults][SITELONG]` in the config.ini file.
+2. Your email address. Here the key name `EMAIL_ADDRESS` stays as it is, and your address replaces `your_email@example.com` — the value on the **right** of the `=`. This is sent as part of an information string to the reverse geocoding API, which is used to recover the site address. Unique site latitude and longitude values extracted from the headers are passed to the API to generate the site address. Your email address is passed to the API as a courtesy, so the provider can see who is using their API. If the API request fails the site location information is taken from `[defaults][SITE]`, `[defaults][SITELAT]` and `[defaults][SITELONG]` in the config.ini file.
 
 ```
 [secret]
@@ -193,6 +216,25 @@ The secret section holds:
         YOUR_API_KEY = https://www.lightpollutionmap.info/QueryRaster/
         EMAIL_ADDRESS = your_email@example.com
 ```
+
+> **The two lines are edited on opposite sides**, which is easy to get wrong.
+> This section is the one place in `config.ini` where a key *name* carries
+> data: the API key is the name on the left, so that line is edited on the
+> left. `EMAIL_ADDRESS` is an ordinary setting name, so that line is edited on
+> the right. After editing, the section should look like this:
+>
+> ```
+> [secret]
+>         #API key        API endpoint
+>         a1b2c3d4e5f6g7h8 = https://www.lightpollutionmap.info/QueryRaster/
+>         EMAIL_ADDRESS = you@example.com
+> ```
+>
+> Writing `you@example.com = your_email@example.com` matches neither
+> `EMAIL_ADDRESS` nor the 16-character key shape, so it is ignored: the run
+> still completes, but with no reverse geocoding, and the site name falls back
+> to `[defaults] SITE`. Since v2.2.2 an entry in this section that is neither
+> of those is reported in `AstroBinUploader.log`.
 
 The two services contacted are lightpollutionmap.info (sky quality) and
 Nominatim / OpenStreetMap (reverse geocoding). TLS and the root certificates
@@ -396,13 +438,34 @@ its usage and exits: give it one or more directories to scan.
 
 ### **A single directory path or symbolic link**
 
- Note: only Linux calling examples are used going forward. On Windows the
- command is the same, with `astrobin-upload.exe` in place of
- `astrobin-upload` if you are not calling it through the PATH.
+ Note: the examples from here on are written as `astrobin-upload`, which
+ assumes the executable is on your `PATH`. If it is not, use `./astrobin-upload`
+ from inside its own folder (Linux/macOS), or `.\astrobin-upload.exe`
+ (Windows PowerShell) — everything after the command name is identical.
 
     astrobin-upload "dir 1" 
 
 The utility expects to find all data contained in the directory passed to it. Symbolic links can be used as the argument passed to the utility and can also be present in the directory. The directory leaf or child directory name must be the target name if the output files are to be named correctly. From the processing perspective the only condition required to ensure data is associated with a given target is that all data and links must reside in the one directory.
+
+> **On Windows, a desktop shortcut is not a symbolic link.** A `.lnk` file is a
+> small file that only File Explorer knows how to follow — the filesystem does
+> not resolve it, so the utility sees a file rather than a folder and rejects
+> it. This is not a limitation of the utility: nothing outside the Windows
+> shell treats a `.lnk` as a directory.
+>
+> Windows does have real directory links, and those work exactly as they do on
+> Linux and macOS. Create one with `mklink`, from a normal Command Prompt:
+>
+> ```
+> mklink /J "%USERPROFILE%\Desktop\SadrRegion" "G:\Sadr Region"
+> ```
+>
+> `/J` makes a *junction* and needs no administrator rights, which makes it the
+> easy choice. `/D` makes a directory symbolic link and requires an elevated
+> prompt or Developer Mode. Either way, pass the link itself — `SadrRegion`,
+> with no extension — and the utility will follow it.
+>
+> On Linux and macOS the equivalent is the ordinary `ln -s "/path/to/data" link`.
 
 ### **Multiple directory paths or symbolic links** 
 
@@ -588,6 +651,14 @@ Note: although data is reported on a per-site basis, data is aggregated from all
 
 ### **The program will not start**
 
+* **"command not found" (Linux/macOS), or "is not recognized as ... a cmdlet
+  or operable program" (Windows PowerShell)**: the shell cannot find the file,
+  because the folder you are in is not on your command path. This is the
+  usual first-run surprise, and it happens even when the executable is
+  sitting right there in the directory listing. Give the shell a path rather
+  than a bare name: `./astrobin-upload` on Linux/macOS,
+  `.\astrobin-upload.exe` in Windows PowerShell. To use the bare name from
+  anywhere, add the executable's folder to your `PATH`.
 * **"Permission denied" (Linux/macOS)**: the executable bit was lost in
   extraction. `chmod +x astrobin-upload`.
 * **macOS refuses to open it**: the binary is not notarised. Allow it under
@@ -610,6 +681,35 @@ right path.
 
 A quoted `~` is not expanded (`"~/Astro/M31"`). Use `$HOME/Astro/M31`, or
 leave the tilde unquoted so the shell expands it before the program sees it.
+
+### **"Not a directory" when passing a Windows shortcut (`.lnk`)**
+
+A desktop shortcut is a file, not a folder, and nothing outside File Explorer
+follows one — so the utility correctly rejects it. Make a real directory link
+instead, from a normal Command Prompt:
+
+    mklink /J "%USERPROFILE%\Desktop\SadrRegion" "G:\Sadr Region"
+
+Then pass `SadrRegion` — the link, without the `.lnk` extension it does not
+have. See [A single directory path or symbolic
+link](#a-single-directory-path-or-symbolic-link) for the full explanation.
+
+### **The site is reported as "Unknown Site"**
+
+The reverse-geocoding lookup did not run or did not succeed, so the site name
+fell back to `[defaults] SITE`. Bortle and SQM are fetched separately, so they
+can still be correct while the name is not.
+
+The usual cause is `EMAIL_ADDRESS` in `[secret]`: Nominatim's terms of service
+require a contact address, and without one no request is made at all. Check
+that the section reads `EMAIL_ADDRESS = you@example.com` — the name on the
+left unchanged, your address on the right — and see [\[secret\]](#secret) for
+why that line is edited on the opposite side to the one above it.
+
+Run with `--debug` and look in `AstroBinUploader.log`: since v2.2.2 it records
+every section of the configuration as it was read (with the API key redacted),
+and reports any `[secret]` entry that is neither `EMAIL_ADDRESS` nor a valid
+key.
 
 ### **Common FITS/XISF Header Issues**
 * **Missing Keywords**: If the utility cannot find specific equipment or location data in your file headers, it will automatically fall back to the values defined in the `[defaults]` section of your `config.ini`.

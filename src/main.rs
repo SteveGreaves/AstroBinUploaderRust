@@ -73,13 +73,41 @@ fn main() -> Result<()> {
     // B10 in REMEDIATION_PLAN.md: the Python side validates directory
     // arguments before use, because an unvalidated typo reached
     // os.makedirs() and silently created the typo'd tree.
-    for dir in &args.directory_paths {
-        if !dir.exists() {
-            bail!("directory path does not exist: {}", dir.display());
+    //
+    // Every invalid path is reported, not just the first: with several
+    // directory arguments, bailing on one hides the rest and turns one
+    // correction into several runs. `is_dir()` alone covers both "does not
+    // exist" and "exists but is a file", exactly as the single
+    // `os.path.isdir` does -- and this prints and exits rather than
+    // returning `Err`, so the message is the Python's and not anyhow's
+    // `Error: ` line (the last survivor of the one PR #8 removed).
+    let invalid: Vec<&std::path::PathBuf> =
+        args.directory_paths.iter().filter(|d| !d.is_dir()).collect();
+    if !invalid.is_empty() {
+        for p in &invalid {
+            println!("[ERROR] Not a directory: {}", p.display());
+            // A Windows .lnk is a shell shortcut: an ordinary small file that
+            // only Explorer resolves, so `is_dir()` is false for it on every
+            // platform -- correctly, since the filesystem has no link there
+            // to follow. Only a real directory link (mklink /J or /D) is one.
+            if p.extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("lnk"))
+            {
+                println!(
+                    "        A Windows shortcut (.lnk) is a file, not a folder. \
+                     Create a real directory"
+                );
+                println!(
+                    "        link with  mklink /J \"link-name\" \"target-folder\", \
+                     or pass the folder itself."
+                );
+            }
         }
-        if !dir.is_dir() {
-            bail!("path is not a directory: {}", dir.display());
-        }
+        println!(
+            "\nOne or more input paths do not exist or are not directories. \
+             Check for typos before re-running."
+        );
+        std::process::exit(1);
     }
 
     if args.dump_parity {
@@ -120,22 +148,22 @@ fn main() -> Result<()> {
     // than with the dump paths above.
     let log_file = out_dir.join("AstroBinUploader.log");
     logging::init(&log_file, args.debug);
-    log_info!("main", 240, "Logging initialized.");
-    log_info!("main", 245, "main version: {}", env!("CARGO_PKG_VERSION"));
-    log_info!("main", 246, "utils version: {}", env!("CARGO_PKG_VERSION"));
+    log_info!("main", 253, "Logging initialized.");
+    log_info!("main", 258, "main version: {}", env!("CARGO_PKG_VERSION"));
+    log_info!("main", 259, "utils version: {}", env!("CARGO_PKG_VERSION"));
     // `sys.argv` rendered as Python renders a list of strings. It can only
     // ever be *this* program's argv, so argv[0] is the binary rather than a
     // .py file; the shape of the line is what matches, not its first element.
     log_info!(
         "main",
-        247,
+        260,
         "Calling function and arguments provided: [{}]",
         std::env::args()
             .map(|a| format!("'{a}'"))
             .collect::<Vec<_>>()
             .join(", ")
     );
-    log_info!("main", 248, "");
+    log_info!("main", 261, "");
 
     println!("Output directory: {}", out_dir.display());
     // The "legacy-compliant console boot sequence" main() prints verbatim.
@@ -150,7 +178,7 @@ fn main() -> Result<()> {
     // (`AstroBinUpload.py` main, Step 2-4): `loader.load`, the header read and
     // its `--debug` step-00 export, `processor.run`, and `exporter.export`. A
     // failure at any point reaches the same `except Exception` net -- the
-    // `main:315`/`316` records, the emergency dump, the two console lines and
+    // `main:328`/`329` records, the emergency dump, the two console lines and
     // `sys.exit(1)` -- so each fallible call here routes to `fatal_error`
     // rather than propagating out of `main` via `?`. The emergency dump only
     // fires once `raw` is bound and non-empty, matching Python's
@@ -187,7 +215,7 @@ fn main() -> Result<()> {
         {
             fatal_error(&e, Some(&raw), &out_dir_str, &log_file);
         }
-        log_info!("main", 277, "Raw scanned headers exported to {path}");
+        log_info!("main", 290, "Raw scanned headers exported to {path}");
     }
 
     // The network layer. `SiteLookup::new` reads `[secret]`; with no such
@@ -235,7 +263,7 @@ fn main() -> Result<()> {
 /// (`AstroBinUpload.py`). `loader.load`, the header read, `processor.run` or
 /// `exporter.export` failing all land here:
 ///
-/// * `logger.error(...)` / `logger.exception(e)` -- `main:315`/`316`. The
+/// * `logger.error(...)` / `logger.exception(e)` -- `main:328`/`329`. The
 ///   port logs only `e`'s outermost message where Python's `logger.exception`
 ///   also writes a traceback; that half is unmatchable by construction (the
 ///   two stacks are different languages) and always has been.
@@ -261,17 +289,17 @@ fn fatal_error(
 ) -> ! {
     log_error!(
         "main",
-        315,
+        328,
         "The application encountered a fatal error and must exit."
     );
-    log_error!("main", 316, "{e}");
+    log_error!("main", 329, "{e}");
     if let Some(raw) = raw {
         if raw.n_rows > 0 {
             let path = pathutil::join(out_dir_str, "emergency_raw_dump.csv");
             match std::fs::write(&path, exporter::to_csv(raw)) {
                 Ok(()) => println!("Emergency data dump saved to: {path}"),
                 // Python only `logger.debug`s this -- no console line.
-                Err(err) => log_debug!("main", 329, "Emergency data dump also failed: {err}"),
+                Err(err) => log_debug!("main", 342, "Emergency data dump also failed: {err}"),
             }
         }
     }
@@ -302,14 +330,14 @@ fn load_config(args: &Cli) -> Result<ConfigFile> {
         }
         log_error!(
             "load",
-            68,
+            88,
             "Custom configuration file missing: {}",
             args.config.display()
         );
         // Text matches Python's own `FileNotFoundError` message. This `Err`
         // is routed through `fatal_error` by `main`'s call site -- Python's
         // `try:` wraps `loader.load(...)`, so a missing custom config reaches
-        // the `main:315`/`316` records, the `[CRITICAL ERROR]` / `Detailed
+        // the `main:328`/`329` records, the `[CRITICAL ERROR]` / `Detailed
         // diagnostics` console lines and `exit(1)` (no emergency dump: no
         // `raw_df` yet). Verified byte-for-byte against live Python 2026-09-10.
         bail!(
@@ -321,10 +349,24 @@ fn load_config(args: &Cli) -> Result<ConfigFile> {
         .with_context(|| format!("parsing {}", args.config.display()))?;
     log_info!(
         "load",
-        81,
+        101,
         "Configuration loaded and normalized from {}",
         args.config.display()
     );
+    // What the program actually read is the single most useful thing to have
+    // when a run does something unexpected, and the log is what gets attached
+    // to a report -- a config with the e-mail address on the wrong side of
+    // the `=` cost a round trip that this record answers at a glance. One
+    // record per section, at DEBUG, so an ordinary run's log is unchanged.
+    // Section names are lowercased and sorted because `ConfigLoader.load`
+    // lowercases them and the dump is emitted from `sorted(normalized)`.
+    let mut names: Vec<String> = cfg.sections.keys().map(|k| k.to_lowercase()).collect();
+    names.sort();
+    for name in &names {
+        if let Some(section) = cfg.section(name) {
+            log_debug!("load", 110, "Config [{name}]: {}", section.redacted_repr());
+        }
+    }
     Ok(cfg)
 }
 
@@ -337,7 +379,7 @@ fn load_config(args: &Cli) -> Result<ConfigFile> {
 fn generate_default_config(path: &std::path::Path) -> Result<()> {
     log_info!(
         "load",
-        62,
+        82,
         "config.ini missing. Generating default configuration template."
     );
     config_write::write_default_config(path)

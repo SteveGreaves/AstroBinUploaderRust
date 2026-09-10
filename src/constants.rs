@@ -26,6 +26,11 @@ pub const SOURCE_PATH: &str = "source_path";
 /// lower-cases it. The scan path never upper-cases column names, so the two
 /// spellings coexist and mixing them up silently loses the column.
 pub const SOURCE_PATH_RAW: &str = "SOURCE_PATH";
+/// The FITS *standard* keyword for integration time. `DURATION` above
+/// ("exposure") is the widespread non-standard sibling that N.I.N.A. and most
+/// capture software also write. PixInsight's integrated masters carry only
+/// this one, which is why stage 2b falls back to it.
+pub const EXPTIME: &str = "exptime";
 pub const NUMBER: &str = "number";
 pub const DATE_OBS: &str = "date-obs";
 pub const SITE_NAME: &str = "site";
