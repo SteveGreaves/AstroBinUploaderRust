@@ -123,9 +123,26 @@ Key features include:
 2. Extract it. The archive contains the executable, `config.ini.example`,
    this `README.md`, its `images/` folder, and `LICENSE`.
 
-3. Put the executable wherever you like. Adding its folder to your `PATH` lets
-   you call `astrobin-upload` from anywhere; otherwise call it by its full path,
-   or `./astrobin-upload` from inside its own folder.
+3. Put the executable wherever you like, then call it from a terminal opened
+   in the folder you want to work in.
+
+   **A program in the current folder is not on your command path**, so its
+   bare name will not start it — you must say where it is:
+
+   | Shell | Type this |
+   |---|---|
+   | Linux / macOS | `./astrobin-upload` |
+   | Windows PowerShell | `.\astrobin-upload.exe` |
+   | Windows Command Prompt | `astrobin-upload.exe` |
+
+   Typing `astrobin-upload` on Linux or macOS gives `command not found`, and
+   on Windows PowerShell `The term 'astrobin-upload' is not recognized`. That
+   is the shell, not the program — see
+   [Troubleshooting](#troubleshooting).
+
+   Optionally, add the executable's folder to your `PATH`. Then the bare name
+   works from any directory, which is how the examples in this manual are
+   written.
 
 **On Linux and macOS**, mark it executable if your extraction tool did not:
 
@@ -143,11 +160,17 @@ same reason — the executable is not code-signed. Choose *More info → Run any
 ## **Creating your config.ini**
 
 The utility needs a `config.ini`. Run it once with no arguments in the
-directory you intend to work from, and it writes a default one and exits:
+directory you intend to work from, and it writes a default one and exits.
 
-    astrobin-upload
+This is the first command you will type, so it is written here in full — on
+Linux and macOS the leading `./` is required unless you have put the
+executable on your `PATH`:
+
+    ./astrobin-upload
 
     A new config.ini file was created. Please edit this before re-running the script.
+
+On Windows PowerShell that is `.\astrobin-upload.exe`.
 
 `config.ini` is looked for in the directory you run the utility *from*, not the
 directory the executable lives in. A `config.ini.example` is also supplied in
@@ -396,9 +419,10 @@ its usage and exits: give it one or more directories to scan.
 
 ### **A single directory path or symbolic link**
 
- Note: only Linux calling examples are used going forward. On Windows the
- command is the same, with `astrobin-upload.exe` in place of
- `astrobin-upload` if you are not calling it through the PATH.
+ Note: the examples from here on are written as `astrobin-upload`, which
+ assumes the executable is on your `PATH`. If it is not, use `./astrobin-upload`
+ from inside its own folder (Linux/macOS), or `.\astrobin-upload.exe`
+ (Windows PowerShell) — everything after the command name is identical.
 
     astrobin-upload "dir 1" 
 
@@ -588,6 +612,14 @@ Note: although data is reported on a per-site basis, data is aggregated from all
 
 ### **The program will not start**
 
+* **"command not found" (Linux/macOS), or "is not recognized as ... a cmdlet
+  or operable program" (Windows PowerShell)**: the shell cannot find the file,
+  because the folder you are in is not on your command path. This is the
+  usual first-run surprise, and it happens even when the executable is
+  sitting right there in the directory listing. Give the shell a path rather
+  than a bare name: `./astrobin-upload` on Linux/macOS,
+  `.\astrobin-upload.exe` in Windows PowerShell. To use the bare name from
+  anywhere, add the executable's folder to your `PATH`.
 * **"Permission denied" (Linux/macOS)**: the executable bit was lost in
   extraction. `chmod +x astrobin-upload`.
 * **macOS refuses to open it**: the binary is not notarised. Allow it under
