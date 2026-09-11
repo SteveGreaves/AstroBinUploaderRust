@@ -1,4 +1,4 @@
-# AstroBin Upload Utility v2.2.1
+# AstroBin Upload Utility v2.2.2
 
 `astrobin-upload` is a single self-contained executable that reads the FITS and
 XISF headers from a directory of astrophotography frames and produces the

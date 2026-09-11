@@ -209,7 +209,7 @@ jobs:
 
           Output is byte-for-byte identical to
           [AstroBinUploader](https://github.com/SteveGreaves/AstroBinUploader)
-          v2.2.1 -- the same CSV, the same summary, the same `--debug` files
+          v2.2.2 -- the same CSV, the same summary, the same `--debug` files
           and the same log.
 
           ### Why use this instead
