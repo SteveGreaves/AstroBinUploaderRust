@@ -120,42 +120,63 @@ Key features include:
     | `x86_64-apple-darwin` | macOS, Intel |
     | `aarch64-apple-darwin` | macOS, Apple Silicon (M1 and later) |
 
-2. Extract it. The archive contains the executable, `config.ini.example`,
-   this `README.md`, its `images/` folder, and `LICENSE`.
+2. Extract it (double-click the downloaded file). The archive contains the
+   executable, `config.ini.example`, this `README.md`, its `images/` folder,
+   and `LICENSE`.
 
-3. Put the executable wherever you like, then call it from a terminal opened
-   in the folder you want to work in.
+### macOS — step by step
 
-   **A program in the current folder is not on your command path**, so its
-   bare name will not start it — you must say where it is:
+1. **Move the extracted folder out of `Downloads`.** Drag it onto your home
+   folder or `Documents` in Finder. (If you skip this, the program can hang
+   with no error when you try to run it — see
+   [Troubleshooting](#troubleshooting) if that happens.)
+2. **Open a terminal.** Press **Cmd+Space**, type `Terminal`, press
+   **Return**.
+3. **Go to that folder in the terminal.** Type `cd ` (with a space after
+   it), then drag the folder from Finder onto the terminal window — this
+   types its path for you — then press **Return**.
+4. **Make the program runnable.** Type `chmod +x astrobin-upload` and press
+   **Return**.
+5. **Run it.** Type `./astrobin-upload` and press **Return**.
+6. macOS will refuse to run it and say it cannot verify it is free of
+   malware. Click **OK**.
+7. Open **System Settings → Privacy & Security**, scroll down, and click
+   **Open Anyway** next to the message about `astrobin-upload`.
+8. Type `./astrobin-upload` and press **Return** again. Click **Open** when
+   asked to confirm.
+9. It will print a message that it created `config.ini` and stop. This is
+   expected on the very first run — see
+   [Creating your config.ini](#creating-your-configini) next.
 
-   | Shell | Type this |
-   |---|---|
-   | Linux / macOS | `./astrobin-upload` |
-   | Windows PowerShell | `.\astrobin-upload.exe` |
-   | Windows Command Prompt | `astrobin-upload.exe` |
+### Windows — step by step
 
-   Typing `astrobin-upload` on Linux or macOS gives `command not found`, and
-   on Windows PowerShell `The term 'astrobin-upload' is not recognized`. That
-   is the shell, not the program — see
-   [Troubleshooting](#troubleshooting).
+1. Open the extracted folder in File Explorer.
+2. Right-click inside it (on empty space, not on a file) and choose **Open
+   in Terminal** (or **Open PowerShell window here**).
+3. Type `.\astrobin-upload.exe` and press **Enter**.
+4. If Windows shows a blue "Windows protected your PC" SmartScreen warning,
+   click **More info**, then **Run anyway**.
+5. It will print a message that it created `config.ini` and stop. This is
+   expected on the very first run — see
+   [Creating your config.ini](#creating-your-configini) next.
 
-   Optionally, add the executable's folder to your `PATH`. Then the bare name
-   works from any directory, which is how the examples in this manual are
-   written.
+### Linux — step by step
 
-**On Linux and macOS**, mark it executable if your extraction tool did not:
+1. Open a terminal in the extracted folder (most file managers offer this
+   from a right-click menu, or open a terminal and `cd` to it).
+2. Type `chmod +x astrobin-upload` and press **Enter**.
+3. Type `./astrobin-upload` and press **Enter**.
+4. It will print a message that it created `config.ini` and stop. This is
+   expected on the very first run — see
+   [Creating your config.ini](#creating-your-configini) next.
 
-    chmod +x astrobin-upload
+### Notes
 
-**On macOS**, the binary is not notarised by Apple, so the first run is blocked.
-Either allow it under *System Settings → Privacy & Security* after the first
-attempt, or clear the quarantine flag yourself:
-
-    xattr -d com.apple.quarantine ./astrobin-upload
-
-**On Windows**, SmartScreen may warn that the publisher is unrecognised, for the
-same reason — the executable is not code-signed. Choose *More info → Run anyway*.
+Typing the bare name `astrobin-upload` (without `./` on Linux/macOS) gives
+`command not found` — that is the shell, not the program; always include the
+`./` (or `.\` in Windows PowerShell) as shown above. Optionally, add the
+executable's folder to your `PATH` so the bare name works from anywhere,
+which is how the rest of this manual is written.
 
 ## **Creating your config.ini**
 
@@ -664,6 +685,9 @@ Note: although data is reported on a per-site basis, data is aggregated from all
 * **macOS refuses to open it**: the binary is not notarised. Allow it under
   *System Settings → Privacy & Security*, or run
   `xattr -d com.apple.quarantine ./astrobin-upload`.
+* **macOS: the program just sits there and does nothing**: move the extracted
+  folder out of `Downloads` (or any iCloud Drive/OneDrive/Dropbox folder) into
+  your home folder or `Documents`, then run it again from there.
 * **Windows SmartScreen warning**: the binary is not code-signed. *More info
   → Run anyway*.
 * **"cannot execute binary file"**: wrong architecture. Check you took the
